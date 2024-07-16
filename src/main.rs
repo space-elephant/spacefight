@@ -3,6 +3,7 @@ use ggez::event::{self, EventHandler};
 use ggez::{conf, graphics};
 use ggez::input::mouse;
 use ggez::input::keyboard::KeyCode;
+use std::num::NonZeroU8;
 mod ship;
 
 fn main() {
@@ -29,10 +30,6 @@ fn main() {
 
 struct MainState {
     ships: Vec<ship::Actor>,
-    /*shipimg: graphics::Image,
-    angle: f32,
-    x: f32,
-    y: f32,*/
 }
 
 impl MainState {
@@ -42,18 +39,44 @@ impl MainState {
 	window.set_fullscreen(Some(ggez::winit::window::Fullscreen::Borderless(monitor)));
 	mouse::set_cursor_hidden(ctx, true);
 
-	let cruiserimg = graphics::Image::from_path(ctx, "/cruiser.png").expect("image loading");
-	
+	let time = std::time::Instant::now();
         MainState {
-	    ships: vec![ship::Actor::new(cruiserimg, (100.0, 100.0), &ship::specs::CRUISER)],
+	    ships: vec![
+		ship::gen_planet(
+		    ctx,
+		    ((960.0.into(), 540.0.into()), 0.0), time,
+		    NonZeroU8::new(1),
+		),
+		ship::specs::Cruiser::gen(
+		    ctx,
+		    ((100.0.into(), 100.0.into()), 0.0), time,
+		    None,
+		),
+	    ],
         }
     }
 }
 
 impl EventHandler for MainState {
     fn update(&mut self, ctx: &mut Context) -> GameResult {
-	for ship in &mut self.ships {
-	    ship.update(ctx)?;
+	let time = std::time::Instant::now();
+
+	for index in 1..self.ships.len() {
+	    let (first, second) = self.ships.split_at_mut(index);
+	    let dest = &mut second[0];
+	    for source in first {
+		source.gravitate(ctx, dest);
+	    }
+	}
+
+	let mut index = self.ships.len();
+	while index > 0 {
+	    index -= 1;
+	    if let Some(mut summon) = self.ships[index].update(ctx, time)? {
+		self.ships.append(&mut summon);
+	    } else {
+		self.ships.remove(index);
+	    }
 	}
         Ok(())
     }
@@ -65,7 +88,7 @@ impl EventHandler for MainState {
 	}
 	
         let mut canvas = graphics::Canvas::from_frame(ctx, graphics::Color::BLACK);
-	for ship in &mut self.ships {
+	for ship in self.ships.iter_mut().rev() {
 	    ship.draw(ctx, &mut canvas)?;
 	}
         canvas.finish(ctx)
