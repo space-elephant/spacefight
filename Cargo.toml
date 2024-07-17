@@ -6,5 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+enum_dispatch = "0.3.13"
 ggez = "0.9.3"
 mint = "0.5.9"
+typenum = "1.17.0"
+uom = {version = "0.36.0", default-features = false, features = ["f32", "si"]}

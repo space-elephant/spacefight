@@ -1,137 +1,153 @@
-use std::ops::{Add, Mul, AddAssign, MulAssign, Neg, Sub, SubAssign, Div, DivAssign};
+//#[macro_use]
+extern crate uom;
+use uom::*;
 
-macro_rules! mkunit {
-    ($unit: ty) => {
-	impl From<f32> for $unit {
-	    fn from(src: f32) -> Self {
-		Self(src)
-	    }
-	}
-
-	impl From<$unit> for f32 {
-	    fn from(src: $unit) -> f32 {
-		src.0
-	    }
-	}
-	
-	impl Neg for $unit {
-	    type Output = Self;
-
-	    fn neg(self) -> Self {
-		Self(-self.0)
-	    }
-	}
-	
-	impl Add for $unit {
-	    type Output = Self;
-
-	    fn add(self, other: Self) -> Self {
-		Self(self.0 + other.0)
-	    }
-	}
-
-	impl AddAssign for $unit {
-	    fn add_assign(&mut self, other: Self) {
-		*self = *self + other;
-	    }
-	}
-	
-	impl Sub for $unit {
-	    type Output = Self;
-
-	    fn sub(self, other: Self) -> Self {
-		self + (-other)
-	    }
-	}
-
-	impl SubAssign for $unit {
-	    fn sub_assign(&mut self, other: Self) {
-		*self = *self - other;
-	    }
-	}
-
-	multiply!($unit, f32, $unit);
-
-	impl MulAssign<f32> for $unit {
-	    fn mul_assign(&mut self, other: f32) {
-		*self = *self * other;
-	    }
-	}
-
-	impl DivAssign<f32> for $unit {
-	    fn div_assign(&mut self, other: f32) {
-		*self = *self / other;
-	    }
-	}
-    };
-}
-
-macro_rules! base_mul {
-    ($base: ty, $other: ty, $result: ty) => {
-	impl Mul<$other> for $base {
-	    type Output = $result;
-
-	    fn mul(self, other: $other) -> $result {
-		(f32::from(self) * f32::from(other)).into()
-	    }
-	}
-
-	impl Div<$other> for $result {
-	    type Output = $base;
-
-	    fn div(self, other: $other) -> $base {
-		(f32::from(self) / f32::from(other)).into()
-	    }
-	}
-    };
-}
-
-macro_rules! multiply {
-    ($base: ty, $other: ty, $result: ty) => {
-	base_mul!($base, $other, $result);
-	base_mul!($other, $base, $result);
-    };
-    ($base: ty, $square: ty) => {
-	base_mul!($base, $base, $square);
-	
-	impl $base {
-	    pub fn sqr(self) -> $square {
-		self * self
-	    }
-	}
-
-	impl $square {
-	    pub fn sqrt(self) -> $base {
-		f32::from(self).sqrt().into()
-	    }
-	}
+system! {
+    quantities: Q {
+        length: tsunit, L;
+        mass: ton, M;
+        time: second, T;
+    }
+    units: U {
+        mod length::Length,
+        mod mass::Mass,
+        mod time::Time,
+	mod velocity::Velocity,
+	mod acceleration::Acceleration,
+	mod gravitation::Gravitation,
+	mod angularvelocity::AngularVelocity,
+	mod area::Area,
+	mod dimensionless::Dimensionless,
+	mod specificenergy::SpecificEnergy,
     }
 }
 
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
-pub struct Time(pub f32);
-mkunit!(Time);
+mod length {
+    quantity! {
+        quantity: Length; "length";
+        dimension: Q<P1 /*length*/, Z0 /*mass*/, Z0 /*time*/>;
+        units {
+            @tsunit: 1.0e0; "tsu", "TrueSpaceunit", "TrueSpaceunits";
+        }
+    }
+}
 
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
-pub struct Distance(pub f32);
-mkunit!(Distance);
+mod mass {
+    quantity! {
+        quantity: Mass; "mass";
+        dimension: Q<Z0 /*length*/, P1 /*mass*/, Z0 /*time*/>;
+        units {
+            @ton: 1.0e0; "t", "ton", "tons";
+        }
+    }
+}
 
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
-pub struct Speed(pub f32);
-mkunit!(Speed);
-multiply!(Speed, Time, Distance);
-multiply!(Speed, SpcEnergy);
+mod time {
+    quantity! {
+        quantity: Time; "time";
+        dimension: Q<Z0 /*length*/, Z0 /*mass*/, P1 /*time*/>;
+        units {
+            @second: 1.0e0; "s", "second", "seconds";
+        }
+    }
+}
 
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
-pub struct Acceleration(pub f32);
-mkunit!(Acceleration);
-multiply!(Acceleration, Time, Speed);
+mod velocity {
+    quantity! {
+        quantity: Velocity; "velocity";
+        dimension: Q<P1 /*length*/, Z0 /*mass*/, N1 /*time*/>;
+        units {
+            @tsunit_per_sec: 1.0e0; "tsu s^-1", "TrueSpaceunit per second", "TrueSpaceunits per second";
+        }
+    }
+}
 
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
-pub struct SpcEnergy(pub f32);
-mkunit!(SpcEnergy);
+mod acceleration {
+    quantity! {
+        quantity: Acceleration; "acceleration";
+        dimension: Q<P1 /*length*/, Z0 /*mass*/, N2 /*time*/>;
+        units {
+            @tsunit_per_sec_sq: 1.0e0; "tsu s^-2", "TrueSpaceunit per second squared", "TrueSpaceunits per second squared";
+        }
+    }
+}
+
+mod gravitation {
+    quantity! {
+        quantity: Gravitation; "gravitation";
+        dimension: Q<P3 /*length*/, N1 /*mass*/, N2 /*time*/>;
+        units {
+            @tsunit_per_sec_sq_ton: 1.0e0; "tsu s^-2 t^-1", "TrueSpaceunit per second squared ton", "TrueSpaceunits per second squared ton";
+            @gravitational_const: 1.1e-14; "G", "gravitational constant", "gravitational constants";
+        }
+    }
+}
+
+mod angularvelocity {
+    quantity! {
+        quantity: AngularVelocity; "angular velocity";
+        dimension: Q<Z0 /*length*/, Z0 /*mass*/, N1 /*time*/>;
+        units {
+            @rad_per_sec: 1.0e0; "rad s^-1", "radian per second", "radians per second";
+            @hertz: std::f32::consts::TAU; "Hz", "Hertz", "Hertz";
+        }
+    }
+}
+
+mod area {
+    quantity! {
+        quantity: Area; "area";
+        dimension: Q<P2 /*length*/, Z0 /*mass*/, Z0 /*time*/>;
+        units {
+            @tsunit_sq: 1.0e0; "tsu^2", "square TrueSpaceunit", "square TrueSpaceunits";
+        }
+    }
+}
+
+mod dimensionless {
+    quantity! {
+        quantity: Dimensionless; "dimensionless";
+        dimension: Q<Z0 /*length*/, Z0 /*mass*/, Z0 /*time*/>;
+        units {
+            @base_unit: 1.0e0; "", "", "";
+        }
+    }
+}
+
+mod specificenergy {
+    quantity! {
+        quantity: SpecificEnergy; "specific energy";
+        dimension: Q<P2 /*length*/, Z0 /*mass*/, N2 /*time*/>;
+        units {
+            @tsu_sq_per_sec_sq: 1.0e0; "tsu^2 s^-2", "TrueSpaceunit squared per second squared", "TrueSpaceunits squared per second squared";
+        }
+    }
+}
+
+mod f32 {
+    Q!(crate::ship::units, f32);
+}
+
+pub use self::f32::{Length, Mass, Time, Velocity, Acceleration, Gravitation, AngularVelocity, Area, SpecificEnergy};
+pub use {length::tsunit, mass::ton, time::second, velocity::tsunit_per_sec, acceleration::tsunit_per_sec_sq, gravitation::tsunit_per_sec_sq_ton, gravitation::gravitational_const, angularvelocity::rad_per_sec, angularvelocity::hertz, area::tsunit_sq, specificenergy::tsu_sq_per_sec_sq};
+
+pub fn sqrt_area(area: Area) -> Length {
+    Length::new::<tsunit>(area.get::<tsunit_sq>().sqrt())
+}
+
+pub fn sqrt_spc_energy(area: SpecificEnergy) -> Velocity {
+    Velocity::new::<tsunit_per_sec>(area.get::<tsu_sq_per_sec_sq>().sqrt())
+}
+
+impl From<self::f32::Dimensionless> for f32 {
+    fn from(src: self::f32::Dimensionless) -> f32 {
+	src.get::<dimensionless::base_unit>()
+    }
+}
+
+#[macro_export]
+macro_rules! make_static {
+    ($unit: ident, $value: expr) => {
+	$unit {dimension: std::marker::PhantomData, units: std::marker::PhantomData, value: $value}
+    }
+}

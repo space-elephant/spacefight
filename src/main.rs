@@ -5,6 +5,10 @@ use ggez::input::mouse;
 use ggez::input::keyboard::KeyCode;
 use std::num::NonZeroU8;
 mod ship;
+use ship::units::*;
+
+#[macro_use]
+extern crate uom;
 
 fn main() {
     let (mut ctx, event_loop) = ContextBuilder::new("spacefight", "Russell VA3BSP <rmorland@tutanota.com>")
@@ -44,12 +48,12 @@ impl MainState {
 	    ships: vec![
 		ship::gen_planet(
 		    ctx,
-		    ((960.0.into(), 540.0.into()), 0.0), time,
+		    ((Length::new::<tsunit>(960.0), Length::new::<tsunit>(540.0)), 0.0), time,
 		    NonZeroU8::new(1),
 		),
 		ship::specs::Cruiser::gen(
 		    ctx,
-		    ((100.0.into(), 100.0.into()), 0.0), time,
+		    ((Length::new::<tsunit>(100.0), Length::new::<tsunit>(100.0)), 0.0), time,
 		    None,
 		),
 	    ],
@@ -62,9 +66,9 @@ impl EventHandler for MainState {
 	let time = std::time::Instant::now();
 
 	for index in 1..self.ships.len() {
-	    let (first, second) = self.ships.split_at_mut(index);
-	    let dest = &mut second[0];
-	    for source in first {
+	    let (left, right) = self.ships.split_at_mut(index);
+	    let dest = &mut right[0];
+	    for source in left {
 		source.gravitate(ctx, dest);
 	    }
 	}
