@@ -2,12 +2,11 @@ use std::f32::consts::TAU;
 use super::{Actor, ActorSpec, Request, Input, ActorNative, ActorTranslator, ActorGeneratorEnum};
 use super::{TimeToLive, FireRate, Hitbox};
 use super::Gravity;
-use super::units::*;
+use super::units;
 use ggez::{Context, GameResult};
 use ggez::graphics;
 use std::time::{Instant, Duration};
 use std::num::NonZeroU8;
-use crate::make_static;
 
 pub struct Cruiser {
     missileimage: graphics::Image,
@@ -15,7 +14,7 @@ pub struct Cruiser {
 }
 
 impl Cruiser {
-    pub fn gen(ctx: &mut Context, position: ((Length, Length), f32), time: Instant, affiliation: NonZeroU8) -> Actor {
+    pub fn gen(ctx: &mut Context, position: ((units::TrueSpaceUnit<f32>, units::TrueSpaceUnit<f32>), f32), time: Instant, affiliation: NonZeroU8) -> Actor {
 	const FIRERATE: Duration = Duration::new(0, 416_666_667);
 	
 	let image = graphics::Image::from_path(ctx, "/ships/cruiser/main.png").expect("missing image");
@@ -34,8 +33,8 @@ impl Cruiser {
 impl ActorTranslator for Cruiser {
     fn update(&mut self, native: &mut ActorNative, _generator: &mut ActorGeneratorEnum, _ctx: &mut Context, input: Input, time: Instant) -> GameResult<Option<Request>> {
 	const MISSILETTL: Duration = Duration::new(2, 500_000_000);
-	const MISSILESTARTSPEED: Velocity = make_static!(Velocity, 960.0);
-	const MISSILESTARTOFFSET: Length = make_static!(Length, 128.0);
+	const MISSILESTARTSPEED: units::TrueSpaceUnitPerSecond<f32> = units::TrueSpaceUnitPerSecond::new(960.0);
+	const MISSILESTARTOFFSET: units::TrueSpaceUnit<f32> = units::TrueSpaceUnit::new(128.0);
 	
 	let steer = if input.right {
 	    if input.left {0.0} else {1.0}
@@ -72,12 +71,12 @@ impl ActorTranslator for Cruiser {
 }
 
 pub static CRUISER: ActorSpec = ActorSpec {
-    maxspeed: make_static!(Velocity, 576.0),
-    acceleration: make_static!(Acceleration, 345.6),
-    turnspeed: make_static!(AngularVelocity, 0.75 * TAU),
-    mass: make_static!(Mass, 6.0),
+    maxspeed: units::TrueSpaceUnitPerSecond::new(576.0),
+    acceleration: units::TrueSpaceUnitPerSecond2::new(345.6),
+    turnspeed: units::RadianPerSecond::new(0.75 * TAU),
+    mass: units::Ton::new(6.0),
     gravity: Gravity::ACCELERATE,
-    hitbox: Hitbox::Circle {radius: make_static!(Length, 72.5)},// make line
+    hitbox: Hitbox::Circle {radius: units::TrueSpaceUnit::new(72.5)},// make line
 };
 
 pub struct CruiserMissile {
@@ -95,10 +94,10 @@ impl ActorTranslator for CruiserMissile {
 }
 
 pub static CRUISERMISSILE: ActorSpec = ActorSpec {
-    maxspeed: make_static!(Velocity, 1920.0),
-    acceleration: make_static!(Acceleration, 345.6),
-    turnspeed: make_static!(AngularVelocity, 0.0),
-    mass: make_static!(Mass, 6.0),
+    maxspeed: units::TrueSpaceUnitPerSecond::new(1920.0),
+    acceleration: units::TrueSpaceUnitPerSecond2::new(345.6),
+    turnspeed: units::RadianPerSecond::new(0.0),
+    mass: units::Ton::new(6.0),
     gravity: Gravity::ACCELERATE,
-    hitbox: Hitbox::Circle {radius: make_static!(Length, 44.0)},// make line
+    hitbox: Hitbox::Circle {radius: units::TrueSpaceUnit::new(44.0)},// make line
 };

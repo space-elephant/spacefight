@@ -7,8 +7,7 @@ use std::num::NonZeroU8;
 pub mod specs;
 pub mod units;
 mod collision;
-use units::*;
-use crate::make_static;
+use crate::dim::{Sqrt, Dimensionless};
 
 #[derive(Debug, Clone, Copy)]
 struct Gravity(u8);
@@ -27,16 +26,16 @@ impl Gravity {
 #[derive(Debug, Clone, Copy)]
 enum Hitbox {
     None,
-    Circle {radius: Length},
-    Line {length: Length, radius: Length},
+    Circle {radius: units::TrueSpaceUnit<f32>},
+    Line {length: units::TrueSpaceUnit<f32>, radius: units::TrueSpaceUnit<f32>},
 }
 
 #[derive(Debug)]
 pub struct ActorSpec {
-    maxspeed: Velocity,// world units per second
-    acceleration: Acceleration,// world units per second squared
-    turnspeed: AngularVelocity,// radians per second
-    mass: Mass,// arbitrary unit
+    maxspeed: units::TrueSpaceUnitPerSecond<f32>,// world units per second
+    acceleration: units::TrueSpaceUnitPerSecond2<f32>,// world units per second squared
+    turnspeed: units::RadianPerSecond<f32>,// radians per second
+    mass: units::Ton<f32>,// arbitrary unit
     gravity: Gravity,
     hitbox: Hitbox,
 }
@@ -57,7 +56,16 @@ impl Actor {
     }
 
     pub fn draw(&mut self, _ctx: &mut Context, canvas: &mut graphics::Canvas) -> GameResult {
-	canvas.draw(&self.native.image, graphics::DrawParam::default().offset(glam::vec2(0.5, 0.5)).rotation(self.native.direction).dest(glam::vec2(self.native.x.get::<tsunit>(), self.native.y.get::<tsunit>())));
+	canvas.draw(
+	    &self.native.image,
+	    graphics::DrawParam::default()
+		.offset(glam::vec2(0.5, 0.5))
+		.rotation(self.native.direction)
+		.dest(glam::vec2(
+		    *(self.native.x / units::TSU).value(),
+		    *(self.native.y / units::TSU).value()
+		))
+	);
 	Ok(())
     }
     
@@ -72,7 +80,7 @@ impl Actor {
 	}
     }
 
-    fn with_velocity(mut self, velocity: (Velocity, Velocity)) -> Self {
+    fn with_velocity(mut self, velocity: (units::TrueSpaceUnitPerSecond<f32>, units::TrueSpaceUnitPerSecond<f32>)) -> Self {
 	(self.native.dx, self.native.dy) = velocity;
 	self
     }
@@ -104,7 +112,7 @@ impl Actor {
 			let collisiondist = local + remote;
 			
 			if distsq < collisiondist*collisiondist {
-			    collision::reflect(&mut self.native, &mut other.native);
+			    collision::reflect(&mut self.native, &mut other.native, (distx, disty));
 			}
 		    },
 		    Hitbox::Line{..} => unreachable!(),
@@ -115,14 +123,14 @@ impl Actor {
     }
 
     fn gravitate(&mut self, ctx: &mut Context, other: &mut Actor) {
-	let time = Time::new::<second>(ctx.time.delta().as_secs_f32());
+	let time = ctx.time.delta().as_secs_f32() * units::S;
 	
 	if self.native.specs.gravity.supports(Gravity::FIELD) && other.native.specs.gravity.supports(Gravity::ACCELERATE) || self.native.specs.gravity.supports(Gravity::ACCELERATE) && other.native.specs.gravity.supports(Gravity::FIELD) {
 	    let distx = self.native.x - other.native.x;
 	    let disty = self.native.y - other.native.y;
 	    let distsq = distx*distx + disty*disty;
-	    let dist = sqrt_area(distsq);
-	    let factor = Gravitation::new::<gravitational_const>(1.0) / (distsq * dist) * time;// G t / r^3: kg^-1 s^-1
+	    let dist = distsq.sqrt();
+	    let factor = units::G / (distsq * dist) * time;// G t / r^3: kg^-1 s^-1
 	    
 	    if self.native.specs.gravity.supports(Gravity::FIELD) && other.native.specs.gravity.supports(Gravity::ACCELERATE) {// gravitational acceleration of other
 		let total = factor * self.native.specs.mass;
@@ -146,31 +154,31 @@ impl Actor {
 #[derive(Debug, Clone)]
 pub struct ActorNative {
     image: graphics::Image,
-    x: Length,
-    y: Length,
+    x: units::TrueSpaceUnit<f32>,
+    y: units::TrueSpaceUnit<f32>,
     direction: f32,
-    dx: Velocity,
-    dy: Velocity,
+    dx: units::TrueSpaceUnitPerSecond<f32>,
+    dy: units::TrueSpaceUnitPerSecond<f32>,
     specs: &'static ActorSpec,
     affiliation: Option<NonZeroU8>,
 }
 
 impl ActorNative {
-    pub fn new(image: graphics::Image, ((x, y), direction): ((Length, Length), f32), specs: &'static ActorSpec, affiliation: Option<NonZeroU8>) -> Self {
+    pub fn new(image: graphics::Image, ((x, y), direction): ((units::TrueSpaceUnit<f32>, units::TrueSpaceUnit<f32>), f32), specs: &'static ActorSpec, affiliation: Option<NonZeroU8>) -> Self {
 	Self {
 	    image,
 	    x,
 	    y,
 	    direction,
-	    dx: Velocity::new::<tsunit_per_sec>(0.0),
-	    dy: Velocity::new::<tsunit_per_sec>(0.0),
+	    dx: 0.0 * units::TSUpS,
+	    dy: 0.0 * units::TSUpS,
 	    specs,
 	    affiliation,
 	}
     }
     
     fn update(&mut self, ctx: &mut Context, steer: f32, throttle: f32) -> GameResult {
-	let time = Time::new::<second>(ctx.time.delta().as_secs_f32());
+	let time = ctx.time.delta().as_secs_f32() * units::S;
 	
 	let angular_velocity = self.specs.turnspeed * steer;
 
@@ -179,9 +187,9 @@ impl ActorNative {
 	let startdy = self.dy;
 	// this average will result in slightly too strong acceleration while turning
 	// but it's negligable at reasonable frame rates, so who cares
-	let centraldirection = self.direction + f32::from(angular_velocity * time * 0.5);
+	let centraldirection = self.direction + *(angular_velocity * time * 0.5).value();
 	
-	self.direction += f32::from(angular_velocity * time);
+	self.direction += *(angular_velocity * time).value();
 	self.direction %= TAU;
 
 	if throttle != 0.0 {
@@ -192,16 +200,16 @@ impl ActorNative {
 	    self.dy += a_y * time;
 
 	    if self.dx*self.dx + self.dy*self.dy > self.specs.maxspeed*self.specs.maxspeed {
-		let speed = sqrt_spc_energy(self.dx*self.dx + self.dy*self.dy);
+		let speed = (self.dx*self.dx + self.dy*self.dy).sqrt();
 
 		// ensure smooth deceleration from overload
-		let mut limit = sqrt_spc_energy(startdx*startdx + startdy*startdy) - self.specs.acceleration * time;
+		let mut limit = (startdx*startdx + startdy*startdy).sqrt() - self.specs.acceleration * time;
 		if speed > limit {
 		    if limit < self.specs.maxspeed {
 			limit = self.specs.maxspeed;
 		    }
 		    
-		    let factor = (limit / speed).into();
+		    let factor = limit / speed;
 		    self.dx *= factor;
 		    self.dy *= factor;
 		}
@@ -323,7 +331,7 @@ enum ActorTranslatorEnum {
     Other(Box<dyn ActorTranslator>),
 }
 
-pub fn gen_planet(ctx: &mut Context, position: ((Length, Length), f32), _time: Instant) -> Actor {
+pub fn gen_planet(ctx: &mut Context, position: ((units::TrueSpaceUnit<f32>, units::TrueSpaceUnit<f32>), f32), _time: Instant) -> Actor {
     let image = graphics::Image::from_path(ctx, "/planets/rainbow.png").expect("missing image");
 
     let native = ActorNative::new(image, position, &PLANET, None);
@@ -331,12 +339,12 @@ pub fn gen_planet(ctx: &mut Context, position: ((Length, Length), f32), _time: I
 }
 
 pub static PLANET: ActorSpec = ActorSpec {
-    maxspeed: make_static!(Velocity, 0.0),
-    acceleration: make_static!(Acceleration, 0.0),
-    turnspeed: make_static!(AngularVelocity, 0.0),
-    mass: make_static!(Mass, 1.0e23),
+    maxspeed: units::TrueSpaceUnitPerSecond::new(0.0),
+    acceleration: units::TrueSpaceUnitPerSecond2::new(0.0),
+    turnspeed: units::RadianPerSecond::new(0.0),
+    mass: units::Ton::new(1.0e23),
     gravity: Gravity::FIELD,
-    hitbox: Hitbox::Circle {radius: make_static!(Length, 150.0)},
+    hitbox: Hitbox::Circle {radius: units::TrueSpaceUnit::new(150.0)},
 };
 
 #[derive(Debug, Clone, Copy)]
