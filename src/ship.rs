@@ -6,6 +6,7 @@ use std::time::{Instant, Duration};
 use std::num::NonZeroU8;
 pub mod specs;
 pub mod units;
+mod collision;
 use units::*;
 use crate::make_static;
 
@@ -23,6 +24,13 @@ impl Gravity {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+enum Hitbox {
+    None,
+    Circle {radius: Length},
+    Line {length: Length, radius: Length},
+}
+
 #[derive(Debug)]
 pub struct ActorSpec {
     maxspeed: Velocity,// world units per second
@@ -30,6 +38,7 @@ pub struct ActorSpec {
     turnspeed: AngularVelocity,// radians per second
     mass: Mass,// arbitrary unit
     gravity: Gravity,
+    hitbox: Hitbox,
 }
 
 pub struct Actor {
@@ -39,17 +48,9 @@ pub struct Actor {
 }
 
 impl Actor {
-    fn new(image: graphics::Image, ((x, y), direction): ((Length, Length), f32), specs: &'static ActorSpec, generator: ActorGeneratorEnum, translator: ActorTranslatorEnum) -> Self {
+    fn new(native: ActorNative, generator: ActorGeneratorEnum, translator: ActorTranslatorEnum) -> Self {
 	Actor {
-	    native: ActorNative {
-		image,
-		x,
-		y,
-		direction,
-		dx: Velocity::new::<tsunit_per_sec>(0.0),
-		dy: Velocity::new::<tsunit_per_sec>(0.0),
-		specs,
-	    },
+	    native,
 	    generator,
 	    translator,
 	}
@@ -75,8 +76,45 @@ impl Actor {
 	(self.native.dx, self.native.dy) = velocity;
 	self
     }
+    
+    pub fn interact(&mut self, ctx: &mut Context, other: &mut Actor) {
+	self.gravitate(ctx, other);
+	self.collide(ctx, other);
+    }
+    
+    fn collide<'a>(mut self: &'a mut Self, ctx: &mut Context, mut other: &'a mut Actor) {
+	if matches!(self.native.specs.hitbox, Hitbox::None) || matches!(other.native.specs.hitbox, Hitbox::None) {
+	    return;
+	}
 
-    pub fn gravitate(&mut self, ctx: &mut Context, other: &mut Actor) {
+	if matches!(self.native.specs.hitbox, Hitbox::Circle{..}) && matches!(other.native.specs.hitbox, Hitbox::Line{..}) {
+	    // swap the pointers, affects this function only
+	    std::mem::swap(&mut self, &mut other);
+	}
+
+	match self.native.specs.hitbox {
+	    Hitbox::None => unreachable!(),
+	    Hitbox::Circle {radius: local} => {
+		match other.native.specs.hitbox {
+		    Hitbox::None => unreachable!(),
+		    Hitbox::Circle {radius: remote} => {
+			let distx = self.native.x - other.native.x;
+			let disty = self.native.y - other.native.y;
+			let distsq = distx*distx + disty*disty;
+			let collisiondist = local + remote;
+			
+			if distsq < collisiondist*collisiondist {
+			    collision::reflect(&mut self.native, &mut other.native);
+			}
+		    },
+		    Hitbox::Line{..} => unreachable!(),
+		}
+	    },
+	    Hitbox::Line{length, radius} => todo!(),
+	}
+    }
+
+    fn gravitate(&mut self, ctx: &mut Context, other: &mut Actor) {
 	let time = Time::new::<second>(ctx.time.delta().as_secs_f32());
 	
 	if self.native.specs.gravity.supports(Gravity::FIELD) && other.native.specs.gravity.supports(Gravity::ACCELERATE) || self.native.specs.gravity.supports(Gravity::ACCELERATE) && other.native.specs.gravity.supports(Gravity::FIELD) {
@@ -106,7 +144,7 @@ impl Actor {
 }
 
 #[derive(Debug, Clone)]
-struct ActorNative {
+pub struct ActorNative {
     image: graphics::Image,
     x: Length,
     y: Length,
@@ -114,9 +152,23 @@ struct ActorNative {
     dx: Velocity,
     dy: Velocity,
     specs: &'static ActorSpec,
+    affiliation: Option<NonZeroU8>,
 }
 
 impl ActorNative {
+    pub fn new(image: graphics::Image, ((x, y), direction): ((Length, Length), f32), specs: &'static ActorSpec, affiliation: Option<NonZeroU8>) -> Self {
+	Self {
+	    image,
+	    x,
+	    y,
+	    direction,
+	    dx: Velocity::new::<tsunit_per_sec>(0.0),
+	    dy: Velocity::new::<tsunit_per_sec>(0.0),
+	    specs,
+	    affiliation,
+	}
+    }
+    
     fn update(&mut self, ctx: &mut Context, steer: f32, throttle: f32) -> GameResult {
 	let time = Time::new::<second>(ctx.time.delta().as_secs_f32());
 	
@@ -271,18 +323,20 @@ enum ActorTranslatorEnum {
     Other(Box<dyn ActorTranslator>),
 }
 
-pub fn gen_planet(ctx: &mut Context, position: ((Length, Length), f32), time: Instant, affiliation: Option<NonZeroU8>) -> Actor {
+pub fn gen_planet(ctx: &mut Context, position: ((Length, Length), f32), _time: Instant) -> Actor {
     let image = graphics::Image::from_path(ctx, "/planets/rainbow.png").expect("missing image");
 
-    Actor::new(image, position, &PLANET, NoControl.into(), NoPower.into())
+    let native = ActorNative::new(image, position, &PLANET, None);
+    Actor::new(native, NoControl.into(), NoPower.into())
 }
 
 pub static PLANET: ActorSpec = ActorSpec {
     maxspeed: make_static!(Velocity, 0.0),
     acceleration: make_static!(Acceleration, 0.0),
     turnspeed: make_static!(AngularVelocity, 0.0),
-    mass: make_static!(Mass, 1.0e21),
+    mass: make_static!(Mass, 1.0e23),
     gravity: Gravity::FIELD,
+    hitbox: Hitbox::Circle {radius: make_static!(Length, 150.0)},
 };
 
 #[derive(Debug, Clone, Copy)]

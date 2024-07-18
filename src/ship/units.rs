@@ -78,7 +78,7 @@ mod gravitation {
         dimension: Q<P3 /*length*/, N1 /*mass*/, N2 /*time*/>;
         units {
             @tsunit_per_sec_sq_ton: 1.0e0; "tsu s^-2 t^-1", "TrueSpaceunit per second squared ton", "TrueSpaceunits per second squared ton";
-            @gravitational_const: 1.1e-14; "G", "gravitational constant", "gravitational constants";
+            @gravitational_const: 1.1e-16; "G", "gravitational constant", "gravitational constants";
         }
     }
 }

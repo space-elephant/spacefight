@@ -1,6 +1,6 @@
 use std::f32::consts::TAU;
 use super::{Actor, ActorSpec, Request, Input, ActorNative, ActorTranslator, ActorGeneratorEnum};
-use super::{TimeToLive, FireRate};
+use super::{TimeToLive, FireRate, Hitbox};
 use super::Gravity;
 use super::units::*;
 use ggez::{Context, GameResult};
@@ -12,23 +12,22 @@ use crate::make_static;
 pub struct Cruiser {
     missileimage: graphics::Image,
     firerate: FireRate,
-    affiliation: Option<NonZeroU8>,
 }
 
 impl Cruiser {
-    pub fn gen(ctx: &mut Context, position: ((Length, Length), f32), time: Instant, affiliation: Option<NonZeroU8>) -> Actor {
+    pub fn gen(ctx: &mut Context, position: ((Length, Length), f32), time: Instant, affiliation: NonZeroU8) -> Actor {
 	const FIRERATE: Duration = Duration::new(0, 416_666_667);
 	
 	let image = graphics::Image::from_path(ctx, "/ships/cruiser/main.png").expect("missing image");
+	let native = ActorNative::new(image, position, &CRUISER, Some(affiliation));
+	
 	let missileimage = graphics::Image::from_path(ctx, "/ships/cruiser/missile.png").expect("missing image");
-
 	let translator = Self {
 	    missileimage,
 	    firerate: FireRate::new(time, FIRERATE),
-	    affiliation,
 	};
 
-	Actor::new(image, position, &CRUISER, super::UserControl.into(), translator.into())
+	Actor::new(native, super::UserControl.into(), translator.into())
     }
 }
 
@@ -51,15 +50,18 @@ impl ActorTranslator for Cruiser {
 	    let unit = (native.direction.sin(), -native.direction.cos());
 	    let dx = MISSILESTARTSPEED * unit.0;
 	    let dy = MISSILESTARTSPEED * unit.1;
+	    let native = ActorNative::new(
+		self.missileimage.clone(),
+		((native.x + MISSILESTARTOFFSET * unit.0, native.y + MISSILESTARTOFFSET * unit.1), native.direction),
+		&CRUISERMISSILE,
+		native.affiliation
+	    );
 	    summon.push(
 		Actor::new(
-		    self.missileimage.clone(),
-		    ((native.x + MISSILESTARTOFFSET * unit.0, native.y + MISSILESTARTOFFSET * unit.1), native.direction),
-		    &CRUISERMISSILE,
+		    native,
 		    super::NoControl.into(),
 		    CruiserMissile {
 			ttl: TimeToLive::new(time, MISSILETTL),
-			affiliation: self.affiliation,
 		    }.into(),
 		).with_velocity((dx, dy))
 	    );
@@ -75,11 +77,11 @@ pub static CRUISER: ActorSpec = ActorSpec {
     turnspeed: make_static!(AngularVelocity, 0.75 * TAU),
     mass: make_static!(Mass, 6.0),
     gravity: Gravity::ACCELERATE,
+    hitbox: Hitbox::Circle {radius: make_static!(Length, 72.5)},// make line
 };
 
 pub struct CruiserMissile {
     ttl: TimeToLive,
-    affiliation: Option<NonZeroU8>,
 }
 
 impl ActorTranslator for CruiserMissile {
@@ -98,4 +100,5 @@ pub static CRUISERMISSILE: ActorSpec = ActorSpec {
     turnspeed: make_static!(AngularVelocity, 0.0),
     mass: make_static!(Mass, 6.0),
     gravity: Gravity::ACCELERATE,
+    hitbox: Hitbox::Circle {radius: make_static!(Length, 44.0)},// make line
 };

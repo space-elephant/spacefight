@@ -49,12 +49,11 @@ impl MainState {
 		ship::gen_planet(
 		    ctx,
 		    ((Length::new::<tsunit>(960.0), Length::new::<tsunit>(540.0)), 0.0), time,
-		    NonZeroU8::new(1),
 		),
 		ship::specs::Cruiser::gen(
 		    ctx,
 		    ((Length::new::<tsunit>(100.0), Length::new::<tsunit>(100.0)), 0.0), time,
-		    None,
+		    NonZeroU8::new(1).unwrap(),
 		),
 	    ],
         }
@@ -69,7 +68,7 @@ impl EventHandler for MainState {
 	    let (left, right) = self.ships.split_at_mut(index);
 	    let dest = &mut right[0];
 	    for source in left {
-		source.gravitate(ctx, dest);
+		source.interact(ctx, dest);
 	    }
 	}
 
