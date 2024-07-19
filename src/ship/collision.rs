@@ -2,11 +2,11 @@ use super::ActorNative;
 use super::units;
 use nalgebra::{Vector2, Matrix2};
 
-pub fn reflect(left: &mut ActorNative, right: &mut ActorNative, normal: (units::TrueSpaceUnit<f32>, units::TrueSpaceUnit<f32>)) {
+pub fn reflect(left: &mut ActorNative, right: &mut ActorNative, normal: Vector2<f32>) {
+    // normal vector need not be normalized, and sign does not matter.
     const ELASTICITY: f32 = 0.5;
     
     // vector and dimensional analysis libraries are not compatible
-    let normal = Vector2::new(normal.0.value_unsafe, normal.1.value_unsafe);
     let leftvelocity = Vector2::new(left.dx.value_unsafe, left.dy.value_unsafe);
     let rightvelocity = Vector2::new(right.dx.value_unsafe, right.dy.value_unsafe);
     let leftmomentum = leftvelocity * left.specs.mass.value_unsafe;

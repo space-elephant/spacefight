@@ -31,4 +31,4 @@ mod internal {
 }
 
 pub use internal::f32consts::*;
-pub use internal::{TrueSpaceUnit, Second, Ton, TrueSpaceUnit2, TrueSpaceUnitPerSecond, ErgPerTon, TrueSpaceUnitPerSecond2, RadianPerSecond, Unitless};
+pub use internal::{TrueSpaceUnit, Second, Ton, TrueSpaceUnitPerSecond, TrueSpaceUnitPerSecond2, RadianPerSecond, Unitless};

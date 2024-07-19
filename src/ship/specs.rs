@@ -46,7 +46,7 @@ impl ActorTranslator for Cruiser {
 
 	let mut summon = Vec::new();
 	if input.fire && self.firerate.try_fire(time) {
-	    let unit = (native.direction.sin(), -native.direction.cos());
+	    let unit = (native.direction.cos(), native.direction.sin());
 	    let dx = MISSILESTARTSPEED * unit.0;
 	    let dy = MISSILESTARTSPEED * unit.1;
 	    let native = ActorNative::new(
@@ -76,7 +76,10 @@ pub static CRUISER: ActorSpec = ActorSpec {
     turnspeed: units::RadianPerSecond::new(0.75 * TAU),
     mass: units::Ton::new(6.0),
     gravity: Gravity::ACCELERATE,
-    hitbox: Hitbox::Circle {radius: units::TrueSpaceUnit::new(72.5)},// make line
+    hitbox: Hitbox::Line {
+	length: units::TrueSpaceUnit::new(107.0),
+	radius: units::TrueSpaceUnit::new(19.0),
+    },
 };
 
 pub struct CruiserMissile {

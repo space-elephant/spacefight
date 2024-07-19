@@ -100,26 +100,71 @@ impl Actor {
 	    std::mem::swap(&mut self, &mut other);
 	}
 
+	if let Some(normal) = self.contacting(other) {
+	    // reverse the frame that pushed us into the block
+	    let time = ctx.time.delta().as_secs_f32() * units::S;
+	    self.native.x -= self.native.dx * time;
+	    self.native.y -= self.native.dy * time;
+	    other.native.x -= other.native.dx * time;
+	    other.native.y -= other.native.dy * time;
+	    
+	    collision::reflect(&mut self.native, &mut other.native, normal);
+	}
+    }
+
+    fn contacting(&self, other: &Actor) -> Option<nalgebra::Vector2<f32>> {
+	use nalgebra::{Vector2, Matrix2, Rotation2};
 	match self.native.specs.hitbox {
 	    Hitbox::None => unreachable!(),
-	    Hitbox::Circle {radius: local} => {
-		match other.native.specs.hitbox {
-		    Hitbox::None => unreachable!(),
-		    Hitbox::Circle {radius: remote} => {
-			let distx = self.native.x - other.native.x;
-			let disty = self.native.y - other.native.y;
+	    Hitbox::Circle {radius: local} => match other.native.specs.hitbox {
+		Hitbox::None => unreachable!(),
+		Hitbox::Circle {radius: remote} => {
+		    let distx = self.native.x - other.native.x;
+		    let disty = self.native.y - other.native.y;
+		    
+		    let distsq = distx*distx + disty*disty;
+		    let collisiondist = local + remote;
+		    
+		    if distsq < collisiondist*collisiondist {
+			return Some(Vector2::new(distx.value_unsafe, disty.value_unsafe));
+		    }
+		},
+		Hitbox::Line{..} => unreachable!(),
+	    },
+	    Hitbox::Line{length, radius} => match other.native.specs.hitbox {
+		Hitbox::None => unreachable!(),
+		Hitbox::Circle {radius: remote} => {
+		    let dist = Vector2::new((self.native.x - other.native.x).value_unsafe, (self.native.y - other.native.y).value_unsafe);
+		    let toaxis = Matrix2::from(Rotation2::new(-self.native.direction)) / length.value_unsafe;
+		    let inline = toaxis * dist;
+		    if inline.x.abs() <= 0.5 {
+			let targetradius = *((radius + remote) / length).value();
+			if inline.y.abs() < targetradius {
+			    // right angles to the direction, sign does not matter
+			    return Some(Vector2::new(-self.native.direction.sin(), self.native.direction.cos()));
+			}
+		    } else {
+			let factor = 0.5f32.copysign(-inline.x) * length;
+			let offsetx = self.native.direction.cos() * factor;
+			let offsety = self.native.direction.sin() * factor;
+			
+			let srcx = self.native.x + offsetx;
+			let srcy = self.native.y + offsety;
+			let distx = srcx - other.native.x;
+			let disty = srcy - other.native.y;
+		    
 			let distsq = distx*distx + disty*disty;
-			let collisiondist = local + remote;
+			let collisiondist = radius + remote;
 			
 			if distsq < collisiondist*collisiondist {
-			    collision::reflect(&mut self.native, &mut other.native, (distx, disty));
+			    return Some(Vector2::new(distx.value_unsafe, disty.value_unsafe));
 			}
-		    },
-		    Hitbox::Line{..} => unreachable!(),
-		}
+		    }
+		},
+		Hitbox::Line{..} => todo!(),
 	    },
-	    Hitbox::Line{length, radius} => todo!(),
 	}
+	None
     }
 
     fn gravitate(&mut self, ctx: &mut Context, other: &mut Actor) {
@@ -193,8 +238,8 @@ impl ActorNative {
 	self.direction %= TAU;
 
 	if throttle != 0.0 {
-	    let a_x = throttle * self.specs.acceleration * centraldirection.sin();
-	    let a_y = throttle * self.specs.acceleration * -centraldirection.cos();
+	    let a_x = throttle * self.specs.acceleration * centraldirection.cos();
+	    let a_y = throttle * self.specs.acceleration * centraldirection.sin();
 
 	    self.dx += a_x * time;
 	    self.dy += a_y * time;
