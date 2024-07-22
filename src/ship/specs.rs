@@ -66,7 +66,7 @@ impl ActorTranslator for Cruiser {
 	Ok(Request{steer, throttle, summon})
     }
     
-    fn collide(&mut self, native: &mut ActorNative, generator: &mut ActorGeneratorEnum, ctx: &mut Context, other: &mut Actor) -> CollisionType {
+    fn collide(&mut self, _native: &mut ActorNative, _generator: &mut ActorGeneratorEnum, _ctx: &mut Context, _other: &mut Actor) -> CollisionType {
 	CollisionType::Kinetic
     }
 }
@@ -74,8 +74,10 @@ impl ActorTranslator for Cruiser {
 pub static CRUISER: ActorSpec = ActorSpec {
     maxspeed: units::TrueSpaceUnitPerSecond::new(576.0),
     acceleration: units::TrueSpaceUnitPerSecond2::new(345.6),
-    turnspeed: units::RadianPerSecond::new(0.75 * TAU),
     mass: units::Ton::new(6.0),
+    turnspeed: units::RadianPerSecond::new(0.75 * TAU),
+    turnacceleration: units::RadianPerSecond2::new(12.0 * TAU),
+    moment: units::TonTrueSpaceUnit2::new(11234.5),
     gravity: Gravity::ACCELERATE,
     hitbox: Hitbox::Line {
 	length: units::TrueSpaceUnit::new(107.0),
@@ -98,7 +100,7 @@ impl ActorTranslator for CruiserMissile {
 	}
     }
     
-    fn collide(&mut self, native: &mut ActorNative, generator: &mut ActorGeneratorEnum, ctx: &mut Context, other: &mut Actor) -> CollisionType {
+    fn collide(&mut self, native: &mut ActorNative, _generator: &mut ActorGeneratorEnum, _ctx: &mut Context, _other: &mut Actor) -> CollisionType {
 	native.dead = true;
 	CollisionType::Silent
     }
@@ -107,8 +109,10 @@ impl ActorTranslator for CruiserMissile {
 pub static CRUISERMISSILE: ActorSpec = ActorSpec {
     maxspeed: units::TrueSpaceUnitPerSecond::new(1920.0),
     acceleration: units::TrueSpaceUnitPerSecond2::new(345.6),
+    mass: units::Ton::new(1.0),
     turnspeed: units::RadianPerSecond::new(0.0),
-    mass: units::Ton::new(6.0),
+    turnacceleration: units::RadianPerSecond2::new(0.0),
+    moment: units::TonTrueSpaceUnit2::new(1291.0),
     gravity: Gravity::ACCELERATE,
     hitbox: Hitbox::Line {
 	length: units::TrueSpaceUnit::new(76.0),

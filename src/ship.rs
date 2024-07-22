@@ -48,8 +48,10 @@ enum CollisionType {
 pub struct ActorSpec {
     maxspeed: units::TrueSpaceUnitPerSecond<f32>,
     acceleration: units::TrueSpaceUnitPerSecond2<f32>,
-    turnspeed: units::RadianPerSecond<f32>,
     mass: units::Ton<f32>,
+    turnspeed: units::RadianPerSecond<f32>,
+    turnacceleration: units::RadianPerSecond2<f32>,
+    moment: units::TonTrueSpaceUnit2<f32>,
     gravity: Gravity,
     hitbox: Hitbox,
     objecttype: ObjectType,
@@ -246,6 +248,7 @@ pub struct ActorNative {
     x: units::TrueSpaceUnit<f32>,
     y: units::TrueSpaceUnit<f32>,
     direction: f32,
+    angularvelocity: units::RadianPerSecond<f32>,
     dx: units::TrueSpaceUnitPerSecond<f32>,
     dy: units::TrueSpaceUnitPerSecond<f32>,
     specs: &'static ActorSpec,
@@ -260,6 +263,7 @@ impl ActorNative {
 	    x,
 	    y,
 	    direction,
+	    angularvelocity: 0.0 * units::RADpS,
 	    dx: 0.0 * units::TSUpS,
 	    dy: 0.0 * units::TSUpS,
 	    specs,
@@ -271,16 +275,29 @@ impl ActorNative {
     fn update(&mut self, ctx: &mut Context, steer: f32, throttle: f32) -> GameResult {
 	let time = ctx.time.delta().as_secs_f32() * units::S;
 	
-	let angular_velocity = self.specs.turnspeed * steer;
+	let targetangularvelocity = self.specs.turnspeed * steer;
+	let startangularvelocity = self.angularvelocity;
+	if startangularvelocity < targetangularvelocity {
+	    self.angularvelocity += self.specs.turnacceleration * time;
+	    if self.angularvelocity > targetangularvelocity {
+		self.angularvelocity = targetangularvelocity;
+	    }
+	} else {
+	    self.angularvelocity -= self.specs.turnacceleration * time;
+	    if self.angularvelocity < targetangularvelocity {
+		self.angularvelocity = targetangularvelocity;
+	    }
+	}
+	let centerangularvelocity = (startangularvelocity + self.angularvelocity) * 0.5;
 
 	// constant acceleration, so half way between starting and ending velocity is perfect
 	let startdx = self.dx;
 	let startdy = self.dy;
-	// this average will result in slightly too strong acceleration while turning
-	// but it's negligable at reasonable frame rates, so who cares
-	let centraldirection = self.direction + *(angular_velocity * time * 0.5).value();
+
+	// not quite perfect, but close enough
+	let centraldirection = self.direction + *(centerangularvelocity * time * 0.5).value();
 	
-	self.direction += *(angular_velocity * time).value();
+	self.direction += *(centerangularvelocity * time).value();
 	self.direction %= TAU;
 
 	if throttle != 0.0 {
@@ -417,7 +434,7 @@ impl ActorTranslator for Planet {
 	)
     }
 
-    fn collide(&mut self, native: &mut ActorNative, generator: &mut ActorGeneratorEnum, ctx: &mut Context, other: &mut Actor) -> CollisionType {
+    fn collide(&mut self, _native: &mut ActorNative, _generator: &mut ActorGeneratorEnum, _ctx: &mut Context, _other: &mut Actor) -> CollisionType {
 	CollisionType::Kinetic
     }
 }
@@ -440,8 +457,10 @@ pub fn gen_planet(ctx: &mut Context, position: ((units::TrueSpaceUnit<f32>, unit
 pub static PLANET: ActorSpec = ActorSpec {
     maxspeed: units::TrueSpaceUnitPerSecond::new(0.0),
     acceleration: units::TrueSpaceUnitPerSecond2::new(0.0),
-    turnspeed: units::RadianPerSecond::new(0.0),
     mass: units::Ton::new(1.0e23),
+    turnspeed: units::RadianPerSecond::new(0.0),
+    turnacceleration: units::RadianPerSecond2::new(0.0),
+    moment: units::TonTrueSpaceUnit2::new(9.0e26),
     gravity: Gravity::FIELD,
     hitbox: Hitbox::Circle {radius: units::TrueSpaceUnit::new(150.0)},
     objecttype: ObjectType::Planet,

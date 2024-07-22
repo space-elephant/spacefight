@@ -1,5 +1,4 @@
 use super::ActorNative;
-use super::units;
 use nalgebra::{Vector2, Matrix2};
 
 pub fn reflect(left: &mut ActorNative, right: &mut ActorNative, normal: Vector2<f32>) {

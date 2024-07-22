@@ -1,4 +1,3 @@
-//pub use self::f32::{Length, Mass, Time, Velocity, Acceleration, Gravitation, AngularVelocity, Area, SpecificEnergy};
 
 mod internal {
     make_units! {
@@ -14,16 +13,17 @@ mod internal {
 	derived {
 	    TSU2: TrueSpaceUnit2 = (TrueSpaceUnit * TrueSpaceUnit), Area;
             TSUpS: TrueSpaceUnitPerSecond = (TrueSpaceUnit / Second), Velocity;
-	    ERGpT: ErgPerTon = (TrueSpaceUnitPerSecond * TrueSpaceUnitPerSecond);
             TSUpS2: TrueSpaceUnitPerSecond2 = (TrueSpaceUnit / Second / Second), Acceleration;
             GRAVUNIT: GravitationUnit = (TrueSpaceUnit * TrueSpaceUnit * TrueSpaceUnit / Ton / Second / Second);
-            RADpS: RadianPerSecond = (Unitless / Second), Frequency;// not really frequency
+            RADpS: RadianPerSecond = (Unitless / Second);
+            RADpS2: RadianPerSecond2 = (Unitless / Second / Second);
+	    TTSU2: TonTrueSpaceUnit2 = (TrueSpaceUnit2 * Ton);// Moment of Inertia
 	}
 
 	constants {
             G: GravitationUnit = 1.1e-16;
             TAU: Unitless = consts::TAU;
-	    RpS: RadianPerSecond = consts::TAU;
+	    HZ: RadianPerSecond = consts::TAU;
 	}
 
 	fmt = true;
@@ -31,4 +31,4 @@ mod internal {
 }
 
 pub use internal::f32consts::*;
-pub use internal::{TrueSpaceUnit, Second, Ton, TrueSpaceUnitPerSecond, TrueSpaceUnitPerSecond2, RadianPerSecond, Unitless};
+pub use internal::{Unitless, TrueSpaceUnit, Second, Ton, TrueSpaceUnitPerSecond, TrueSpaceUnitPerSecond2, RadianPerSecond, RadianPerSecond2, TonTrueSpaceUnit2};
