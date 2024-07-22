@@ -1,8 +1,5 @@
 use std::f32::consts::TAU;
-use super::{Actor, ActorSpec, Request, Input, ActorNative, ActorTranslator, ActorGeneratorEnum};
-use super::{TimeToLive, FireRate, Hitbox};
-use super::Gravity;
-use super::units;
+use super::*;
 use ggez::{Context, GameResult};
 use ggez::graphics;
 use std::time::{Instant, Duration};
@@ -31,7 +28,7 @@ impl Cruiser {
 }
 
 impl ActorTranslator for Cruiser {
-    fn update(&mut self, native: &mut ActorNative, _generator: &mut ActorGeneratorEnum, _ctx: &mut Context, input: Input, time: Instant) -> GameResult<Option<Request>> {
+    fn update(&mut self, native: &mut ActorNative, _generator: &mut ActorGeneratorEnum, _ctx: &mut Context, input: Input, time: Instant) -> GameResult<Request> {
 	const MISSILETTL: Duration = Duration::new(2, 500_000_000);
 	const MISSILESTARTSPEED: units::TrueSpaceUnitPerSecond<f32> = units::TrueSpaceUnitPerSecond::new(960.0);
 	const MISSILESTARTOFFSET: units::TrueSpaceUnit<f32> = units::TrueSpaceUnit::new(128.0);
@@ -66,7 +63,11 @@ impl ActorTranslator for Cruiser {
 	    );
 	}
 
-	Ok(Some(Request{steer, throttle, summon}))
+	Ok(Request{steer, throttle, summon})
+    }
+    
+    fn collide(&mut self, native: &mut ActorNative, generator: &mut ActorGeneratorEnum, ctx: &mut Context, other: &mut Actor) -> CollisionType {
+	CollisionType::Kinetic
     }
 }
 
@@ -80,6 +81,7 @@ pub static CRUISER: ActorSpec = ActorSpec {
 	length: units::TrueSpaceUnit::new(107.0),
 	radius: units::TrueSpaceUnit::new(19.0),
     },
+    objecttype: ObjectType::Ship
 };
 
 pub struct CruiserMissile {
@@ -87,12 +89,18 @@ pub struct CruiserMissile {
 }
 
 impl ActorTranslator for CruiserMissile {
-    fn update(&mut self, _native: &mut ActorNative, _generator: &mut ActorGeneratorEnum, _ctx: &mut Context, _input: Input, time: Instant) -> GameResult<Option<Request>> {
+    fn update(&mut self, native: &mut ActorNative, _generator: &mut ActorGeneratorEnum, _ctx: &mut Context, _input: Input, time: Instant) -> GameResult<Request> {
 	if self.ttl.done(time) {
-	    Ok(None)
+	    native.dead = true;
+	    Ok(Request::new(0.0, 0.0))
 	} else {
-	    Ok(Some(Request::new(0.0, 1.0)))
+	    Ok(Request::new(0.0, 1.0))
 	}
+    }
+    
+    fn collide(&mut self, native: &mut ActorNative, generator: &mut ActorGeneratorEnum, ctx: &mut Context, other: &mut Actor) -> CollisionType {
+	native.dead = true;
+	CollisionType::Silent
     }
 }
 
@@ -102,5 +110,9 @@ pub static CRUISERMISSILE: ActorSpec = ActorSpec {
     turnspeed: units::RadianPerSecond::new(0.0),
     mass: units::Ton::new(6.0),
     gravity: Gravity::ACCELERATE,
-    hitbox: Hitbox::Circle {radius: units::TrueSpaceUnit::new(44.0)},// make line
+    hitbox: Hitbox::Line {
+	length: units::TrueSpaceUnit::new(76.0),
+	radius: units::TrueSpaceUnit::new(6.0),
+    },
+    objecttype: ObjectType::Projectile,
 };

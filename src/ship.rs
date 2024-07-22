@@ -30,14 +30,29 @@ enum Hitbox {
     Line {length: units::TrueSpaceUnit<f32>, radius: units::TrueSpaceUnit<f32>},
 }
 
+#[derive(Debug, Clone, Copy)]
+enum ObjectType {
+    Planet,
+    Asteroid,
+    Ship,
+    Projectile,
+}
+
+// Silent takes priority
+enum CollisionType {
+    Silent,
+    Kinetic,
+}
+
 #[derive(Debug)]
 pub struct ActorSpec {
-    maxspeed: units::TrueSpaceUnitPerSecond<f32>,// world units per second
-    acceleration: units::TrueSpaceUnitPerSecond2<f32>,// world units per second squared
-    turnspeed: units::RadianPerSecond<f32>,// radians per second
-    mass: units::Ton<f32>,// arbitrary unit
+    maxspeed: units::TrueSpaceUnitPerSecond<f32>,
+    acceleration: units::TrueSpaceUnitPerSecond2<f32>,
+    turnspeed: units::RadianPerSecond<f32>,
+    mass: units::Ton<f32>,
     gravity: Gravity,
     hitbox: Hitbox,
+    objecttype: ObjectType,
 }
 
 pub struct Actor {
@@ -47,6 +62,10 @@ pub struct Actor {
 }
 
 impl Actor {
+    pub fn dead(&self) -> bool {
+	self.native.dead
+    }
+    
     fn new(native: ActorNative, generator: ActorGeneratorEnum, translator: ActorTranslatorEnum) -> Self {
 	Actor {
 	    native,
@@ -56,28 +75,26 @@ impl Actor {
     }
 
     pub fn draw(&mut self, _ctx: &mut Context, canvas: &mut graphics::Canvas) -> GameResult {
-	canvas.draw(
-	    &self.native.image,
-	    graphics::DrawParam::default()
-		.offset(glam::vec2(0.5, 0.5))
-		.rotation(self.native.direction)
-		.dest(glam::vec2(
-		    *(self.native.x / units::TSU).value(),
-		    *(self.native.y / units::TSU).value()
-		))
-	);
+	if !self.dead() {
+	    canvas.draw(
+		&self.native.image,
+		graphics::DrawParam::default()
+		    .offset(glam::vec2(0.5, 0.5))
+		    .rotation(self.native.direction)
+		    .dest(glam::vec2(
+			*(self.native.x / units::TSU).value(),
+			*(self.native.y / units::TSU).value()
+		    ))
+	    );
+	}
 	Ok(())
     }
     
-    pub fn update(&mut self, ctx: &mut Context, time: Instant) -> GameResult<Option<Vec<Actor>>> {
+    pub fn update(&mut self, ctx: &mut Context, time: Instant) -> GameResult<Vec<Actor>> {
 	let input = self.generator.update(&mut self.native, &mut self.translator, ctx)?;
 	let request = self.translator.update(&mut self.native, &mut self.generator, ctx, input, time)?;
-	if let Some(request) = request {
-	    self.native.update(ctx, request.steer, request.throttle)?;
-	    Ok(Some(request.summon))
-	} else {
-	    Ok(None)
-	}
+	self.native.update(ctx, request.steer, request.throttle)?;
+	Ok(request.summon)
     }
 
     fn with_velocity(mut self, velocity: (units::TrueSpaceUnitPerSecond<f32>, units::TrueSpaceUnitPerSecond<f32>)) -> Self {
@@ -101,19 +118,23 @@ impl Actor {
 	}
 
 	if let Some(normal) = self.contacting(other) {
-	    // reverse the frame that pushed us into the block
-	    let time = ctx.time.delta().as_secs_f32() * units::S;
-	    self.native.x -= self.native.dx * time;
-	    self.native.y -= self.native.dy * time;
-	    other.native.x -= other.native.dx * time;
-	    other.native.y -= other.native.dy * time;
-	    
-	    collision::reflect(&mut self.native, &mut other.native, normal);
+	    let local = self.translator.collide(&mut self.native, &mut self.generator, ctx, other);
+	    let remote = other.translator.collide(&mut other.native, &mut other.generator, ctx, self);
+	    if matches!(local, CollisionType::Kinetic) && matches!(remote, CollisionType::Kinetic) {
+		// reverse the frame that pushed us into the block
+		let time = ctx.time.delta().as_secs_f32() * units::S;
+		self.native.x -= self.native.dx * time;
+		self.native.y -= self.native.dy * time;
+		other.native.x -= other.native.dx * time;
+		other.native.y -= other.native.dy * time;
+		
+		collision::reflect(&mut self.native, &mut other.native, normal);
+	    }
 	}
     }
 
     fn contacting(&self, other: &Actor) -> Option<nalgebra::Vector2<f32>> {
-	use nalgebra::{Vector2, Matrix2, Rotation2};
+	use nalgebra::Vector2;
 	match self.native.specs.hitbox {
 	    Hitbox::None => unreachable!(),
 	    Hitbox::Circle {radius: local} => match other.native.specs.hitbox {
@@ -131,38 +152,61 @@ impl Actor {
 		},
 		Hitbox::Line{..} => unreachable!(),
 	    },
-	    Hitbox::Line{length, radius} => match other.native.specs.hitbox {
+	    Hitbox::Line {length, radius} => match other.native.specs.hitbox {
 		Hitbox::None => unreachable!(),
-		Hitbox::Circle {radius: remote} => {
-		    let dist = Vector2::new((self.native.x - other.native.x).value_unsafe, (self.native.y - other.native.y).value_unsafe);
-		    let toaxis = Matrix2::from(Rotation2::new(-self.native.direction)) / length.value_unsafe;
-		    let inline = toaxis * dist;
-		    if inline.x.abs() <= 0.5 {
-			let targetradius = *((radius + remote) / length).value();
-			if inline.y.abs() < targetradius {
-			    // right angles to the direction, sign does not matter
-			    return Some(Vector2::new(-self.native.direction.sin(), self.native.direction.cos()));
-			}
-		    } else {
-			let factor = 0.5f32.copysign(-inline.x) * length;
-			let offsetx = self.native.direction.cos() * factor;
-			let offsety = self.native.direction.sin() * factor;
-			
-			let srcx = self.native.x + offsetx;
-			let srcy = self.native.y + offsety;
-			let distx = srcx - other.native.x;
-			let disty = srcy - other.native.y;
+		Hitbox::Circle {radius: remote} => return self.line_contacting_circle((other.native.x, other.native.y), length, radius + remote),
+		Hitbox::Line {length: remote, radius: remoteradius} => {
+		    let totalradius = radius + remoteradius;
 		    
-			let distsq = distx*distx + disty*disty;
-			let collisiondist = radius + remote;
-			
-			if distsq < collisiondist*collisiondist {
-			    return Some(Vector2::new(distx.value_unsafe, disty.value_unsafe));
-			}
+		    let offsetx = self.native.direction.cos() * length * 0.5;
+		    let offsety = self.native.direction.sin() * length * 0.5;
+		    if let Some(normal) = other.line_contacting_circle((self.native.x + offsetx, self.native.y + offsety), remote, totalradius) {
+			return Some(normal);
+		    }
+		    if let Some(normal) = other.line_contacting_circle((self.native.x - offsetx, self.native.y - offsety), remote, totalradius) {
+			return Some(normal);
+		    }
+		    
+		    let offsetx = other.native.direction.cos() * remote * 0.5;
+		    let offsety = other.native.direction.sin() * remote * 0.5;
+		    if let Some(normal) = self.line_contacting_circle((other.native.x + offsetx, other.native.y + offsety), length, totalradius) {
+			return Some(normal);
+		    }
+		    if let Some(normal) = self.line_contacting_circle((other.native.x - offsetx, other.native.y - offsety), length, totalradius) {
+			return Some(normal);
 		    }
 		},
-		Hitbox::Line{..} => todo!(),
 	    },
+	}
+	None
+    }
+
+    fn line_contacting_circle(&self, (otherx, othery): (units::TrueSpaceUnit<f32>, units::TrueSpaceUnit<f32>), length: units::TrueSpaceUnit<f32>, totalradius: units::TrueSpaceUnit<f32>) -> Option<nalgebra::Vector2<f32>> {
+	use nalgebra::{Vector2, Matrix2, Rotation2};
+	let dist = Vector2::new((self.native.x - otherx).value_unsafe, (self.native.y - othery).value_unsafe);
+	let toaxis = Matrix2::from(Rotation2::new(-self.native.direction)) / length.value_unsafe;
+	let inline = toaxis * dist;
+	if inline.x.abs() <= 0.5 {
+	    let targetradius = *(totalradius / length).value();
+	    if inline.y.abs() < targetradius {
+		// right angles to the direction, sign does not matter
+		return Some(Vector2::new(-self.native.direction.sin(), self.native.direction.cos()));
+	    }
+	} else {
+	    let factor = 0.5f32.copysign(-inline.x) * length;
+	    let offsetx = self.native.direction.cos() * factor;
+	    let offsety = self.native.direction.sin() * factor;
+	    
+	    let srcx = self.native.x + offsetx;
+	    let srcy = self.native.y + offsety;
+	    let distx = srcx - otherx;
+	    let disty = srcy - othery;
+	    
+	    let distsq = distx*distx + disty*disty;
+	    
+	    if distsq < totalradius*totalradius {
+		return Some(Vector2::new(distx.value_unsafe, disty.value_unsafe));
+	    }
 	}
 	None
     }
@@ -206,6 +250,7 @@ pub struct ActorNative {
     dy: units::TrueSpaceUnitPerSecond<f32>,
     specs: &'static ActorSpec,
     affiliation: Option<NonZeroU8>,
+    dead: bool,
 }
 
 impl ActorNative {
@@ -219,6 +264,7 @@ impl ActorNative {
 	    dy: 0.0 * units::TSUpS,
 	    specs,
 	    affiliation,
+	    dead: false,
 	}
     }
     
@@ -345,32 +391,40 @@ impl Request {
 
 #[enum_dispatch(ActorTranslatorEnum)]
 trait ActorTranslator {
-    fn update(&mut self, native: &mut ActorNative, generator: &mut ActorGeneratorEnum, ctx: &mut Context, input: Input, time: Instant) -> GameResult<Option<Request>>;
+    fn update(&mut self, native: &mut ActorNative, generator: &mut ActorGeneratorEnum, ctx: &mut Context, input: Input, time: Instant) -> GameResult<Request>;
+    fn collide(&mut self, native: &mut ActorNative, generator: &mut ActorGeneratorEnum, ctx: &mut Context, other: &mut Actor) -> CollisionType;
 }
 
 impl ActorTranslator for Box<dyn ActorTranslator> {
-    fn update(&mut self, native: &mut ActorNative, generator: &mut ActorGeneratorEnum, ctx: &mut Context, input: Input, time: Instant) -> GameResult<Option<Request>> {
+    fn update(&mut self, native: &mut ActorNative, generator: &mut ActorGeneratorEnum, ctx: &mut Context, input: Input, time: Instant) -> GameResult<Request> {
 	(&mut **self).update(native, generator, ctx, input, time)
+    }
+    fn collide(&mut self, native: &mut ActorNative, generator: &mut ActorGeneratorEnum, ctx: &mut Context, other: &mut Actor) -> CollisionType {
+	(&mut **self).collide(native, generator, ctx, other)
     }
 }
 
-struct NoPower;
+struct Planet;
 
-impl ActorTranslator for NoPower {
-    fn update(&mut self, _native: &mut ActorNative, _generator: &mut ActorGeneratorEnum, _ctx: &mut Context, _input: Input, _time: Instant) -> GameResult<Option<Request>> {
-	Ok(Some(
+impl ActorTranslator for Planet {
+    fn update(&mut self, _native: &mut ActorNative, _generator: &mut ActorGeneratorEnum, _ctx: &mut Context, _input: Input, _time: Instant) -> GameResult<Request> {
+	Ok(
 	    Request {
 		steer: 0.0,
 		throttle: 0.0,
 		summon: Vec::new(),
 	    }
-	))
+	)
+    }
+
+    fn collide(&mut self, native: &mut ActorNative, generator: &mut ActorGeneratorEnum, ctx: &mut Context, other: &mut Actor) -> CollisionType {
+	CollisionType::Kinetic
     }
 }
 
 #[enum_dispatch]
 enum ActorTranslatorEnum {
-    NoPower,
+    Planet,
     Cruiser(specs::Cruiser),
     CruiserMissile(specs::CruiserMissile),
     Other(Box<dyn ActorTranslator>),
@@ -380,7 +434,7 @@ pub fn gen_planet(ctx: &mut Context, position: ((units::TrueSpaceUnit<f32>, unit
     let image = graphics::Image::from_path(ctx, "/planets/rainbow.png").expect("missing image");
 
     let native = ActorNative::new(image, position, &PLANET, None);
-    Actor::new(native, NoControl.into(), NoPower.into())
+    Actor::new(native, NoControl.into(), Planet.into())
 }
 
 pub static PLANET: ActorSpec = ActorSpec {
@@ -390,6 +444,7 @@ pub static PLANET: ActorSpec = ActorSpec {
     mass: units::Ton::new(1.0e23),
     gravity: Gravity::FIELD,
     hitbox: Hitbox::Circle {radius: units::TrueSpaceUnit::new(150.0)},
+    objecttype: ObjectType::Planet,
 };
 
 #[derive(Debug, Clone, Copy)]

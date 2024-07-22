@@ -74,12 +74,18 @@ impl EventHandler for MainState {
 	let mut index = self.ships.len();
 	while index > 0 {
 	    index -= 1;
-	    if let Some(mut summon) = self.ships[index].update(ctx, time)? {
-		self.ships.append(&mut summon);
-	    } else {
+	    let mut summon = self.ships[index].update(ctx, time)?;
+	    self.ships.append(&mut summon);
+	}
+	
+	let mut index = self.ships.len();
+	while index > 0 {
+	    index -= 1;
+	    if self.ships[index].dead() {
 		self.ships.remove(index);
 	    }
 	}
+
         Ok(())
     }
 
