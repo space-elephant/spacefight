@@ -17,7 +17,6 @@ mod internal {
             GRAVUNIT: GravitationUnit = (TrueSpaceUnit * TrueSpaceUnit * TrueSpaceUnit / Ton / Second / Second);
             RADpS: RadianPerSecond = (Unitless / Second);
             RADpS2: RadianPerSecond2 = (Unitless / Second / Second);
-	    TTSU2: TonTrueSpaceUnit2 = (TrueSpaceUnit2 * Ton);// Moment of Inertia
 	}
 
 	constants {
@@ -31,4 +30,4 @@ mod internal {
 }
 
 pub use internal::f32consts::*;
-pub use internal::{Unitless, TrueSpaceUnit, Second, Ton, TrueSpaceUnitPerSecond, TrueSpaceUnitPerSecond2, RadianPerSecond, RadianPerSecond2, TonTrueSpaceUnit2};
+pub use internal::{Unitless, TrueSpaceUnit, Second, Ton, TrueSpaceUnit2, TrueSpaceUnitPerSecond, TrueSpaceUnitPerSecond2, RadianPerSecond, RadianPerSecond2};

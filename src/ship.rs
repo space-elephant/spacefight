@@ -51,7 +51,7 @@ pub struct ActorSpec {
     mass: units::Ton<f32>,
     turnspeed: units::RadianPerSecond<f32>,
     turnacceleration: units::RadianPerSecond2<f32>,
-    moment: units::TonTrueSpaceUnit2<f32>,
+    inertia: units::TrueSpaceUnit2<f32>,// Actually moment divided by mass
     gravity: Gravity,
     hitbox: Hitbox,
     objecttype: ObjectType,
@@ -119,7 +119,7 @@ impl Actor {
 	    std::mem::swap(&mut self, &mut other);
 	}
 
-	if let Some(normal) = self.contacting(other) {
+	if let Some((normal, angularlocal, angularremote)) = self.contacting(other) {
 	    let local = self.translator.collide(&mut self.native, &mut self.generator, ctx, other);
 	    let remote = other.translator.collide(&mut other.native, &mut other.generator, ctx, self);
 	    if matches!(local, CollisionType::Kinetic) && matches!(remote, CollisionType::Kinetic) {
@@ -127,15 +127,19 @@ impl Actor {
 		let time = ctx.time.delta().as_secs_f32() * units::S;
 		self.native.x -= self.native.dx * time;
 		self.native.y -= self.native.dy * time;
+		self.native.direction -= (self.native.angularvelocity * time).value();
+		self.native.direction %= TAU;
 		other.native.x -= other.native.dx * time;
 		other.native.y -= other.native.dy * time;
+		other.native.direction -= (other.native.angularvelocity * time).value();
+		other.native.direction %= TAU;
 		
-		collision::reflect(&mut self.native, &mut other.native, normal);
+		collision::reflect(&mut self.native, &mut other.native, normal, angularlocal, angularremote);
 	    }
 	}
     }
 
-    fn contacting(&self, other: &Actor) -> Option<nalgebra::Vector2<f32>> {
+    fn contacting(&self, other: &Actor) -> Option<(nalgebra::Vector2<f32>, units::TrueSpaceUnit<f32>, units::TrueSpaceUnit<f32>)> {
 	use nalgebra::Vector2;
 	match self.native.specs.hitbox {
 	    Hitbox::None => unreachable!(),
@@ -149,33 +153,51 @@ impl Actor {
 		    let collisiondist = local + remote;
 		    
 		    if distsq < collisiondist*collisiondist {
-			return Some(Vector2::new(distx.value_unsafe, disty.value_unsafe));
+			return Some((Vector2::new(distx.value_unsafe, disty.value_unsafe), 0.0 * units::TSU, 0.0 * units::TSU));
 		    }
 		},
 		Hitbox::Line{..} => unreachable!(),
 	    },
 	    Hitbox::Line {length, radius} => match other.native.specs.hitbox {
 		Hitbox::None => unreachable!(),
-		Hitbox::Circle {radius: remote} => return self.line_contacting_circle((other.native.x, other.native.y), length, radius + remote),
+		Hitbox::Circle {radius: remote} => if let Some((normal, angularlocal)) = self.line_contacting_circle((other.native.x, other.native.y), length, radius + remote) {
+		    return Some((normal, angularlocal, 0.0 * units::TSU));
+		},
 		Hitbox::Line {length: remote, radius: remoteradius} => {
 		    let totalradius = radius + remoteradius;
+
+		    let cos = self.native.direction.cos();
+		    let sin = self.native.direction.sin();
+		    let offsetx = cos * length * 0.5;
+		    let offsety = sin * length * 0.5;
+		    if let Some((normal, angularremote)) = other.line_contacting_circle((self.native.x + offsetx, self.native.y + offsety), remote, totalradius) {
+			let unit = Vector2::new(sin, -cos);
+			let product = unit.dot(&normal.normalize());
+			let angularlocal = product * length * 0.5;
+			return Some((normal, angularlocal, angularremote));
+		    }
+		    if let Some((normal, angularremote)) = other.line_contacting_circle((self.native.x - offsetx, self.native.y - offsety), remote, totalradius) {
+			let unit = Vector2::new(-sin, cos);
+			let product = unit.dot(&normal.normalize());
+			let angularlocal = product * length * 0.5;
+			return Some((normal, angularlocal, angularremote));
+		    }
 		    
-		    let offsetx = self.native.direction.cos() * length * 0.5;
-		    let offsety = self.native.direction.sin() * length * 0.5;
-		    if let Some(normal) = other.line_contacting_circle((self.native.x + offsetx, self.native.y + offsety), remote, totalradius) {
-			return Some(normal);
+		    let cos = other.native.direction.cos();
+		    let sin = other.native.direction.sin();
+		    let offsetx = cos * remote * 0.5;
+		    let offsety = sin * remote * 0.5;
+		    if let Some((normal, angularlocal)) = self.line_contacting_circle((other.native.x + offsetx, other.native.y + offsety), length, totalradius) {
+			let unit = Vector2::new(sin, -cos);
+			let product = unit.dot(&normal.normalize());
+			let angularremote = product * remote * 0.5;
+			return Some((normal, angularlocal, angularremote));
 		    }
-		    if let Some(normal) = other.line_contacting_circle((self.native.x - offsetx, self.native.y - offsety), remote, totalradius) {
-			return Some(normal);
-		    }
-		    
-		    let offsetx = other.native.direction.cos() * remote * 0.5;
-		    let offsety = other.native.direction.sin() * remote * 0.5;
-		    if let Some(normal) = self.line_contacting_circle((other.native.x + offsetx, other.native.y + offsety), length, totalradius) {
-			return Some(normal);
-		    }
-		    if let Some(normal) = self.line_contacting_circle((other.native.x - offsetx, other.native.y - offsety), length, totalradius) {
-			return Some(normal);
+		    if let Some((normal, angularlocal)) = self.line_contacting_circle((other.native.x - offsetx, other.native.y - offsety), length, totalradius) {
+			let unit = Vector2::new(-sin, cos);
+			let product = unit.dot(&normal.normalize());
+			let angularremote = product * remote * 0.5;
+			return Some((normal, angularlocal, angularremote));
 		    }
 		},
 	    },
@@ -183,18 +205,22 @@ impl Actor {
 	None
     }
 
-    fn line_contacting_circle(&self, (otherx, othery): (units::TrueSpaceUnit<f32>, units::TrueSpaceUnit<f32>), length: units::TrueSpaceUnit<f32>, totalradius: units::TrueSpaceUnit<f32>) -> Option<nalgebra::Vector2<f32>> {
+    fn line_contacting_circle(&self, (otherx, othery): (units::TrueSpaceUnit<f32>, units::TrueSpaceUnit<f32>), length: units::TrueSpaceUnit<f32>, totalradius: units::TrueSpaceUnit<f32>) -> Option<(nalgebra::Vector2<f32>, units::TrueSpaceUnit<f32>)> {
 	use nalgebra::{Vector2, Matrix2, Rotation2};
 	let dist = Vector2::new((self.native.x - otherx).value_unsafe, (self.native.y - othery).value_unsafe);
 	let toaxis = Matrix2::from(Rotation2::new(-self.native.direction)) / length.value_unsafe;
-	let inline = toaxis * dist;
+	let inline = toaxis * dist;// self is horizontal, from -0.5 to 0.5
 	if inline.x.abs() <= 0.5 {
 	    let targetradius = *(totalradius / length).value();
 	    if inline.y.abs() < targetradius {
 		// right angles to the direction, sign does not matter
-		return Some(Vector2::new(-self.native.direction.sin(), self.native.direction.cos()));
+		return Some((
+		    Vector2::new(-self.native.direction.sin(), self.native.direction.cos()),
+		    -inline.x * length,
+		));
 	    }
 	} else {
+	    // maybe use transformed coords, which could be duplicated
 	    let factor = 0.5f32.copysign(-inline.x) * length;
 	    let offsetx = self.native.direction.cos() * factor;
 	    let offsety = self.native.direction.sin() * factor;
@@ -207,7 +233,11 @@ impl Actor {
 	    let distsq = distx*distx + disty*disty;
 	    
 	    if distsq < totalradius*totalradius {
-		return Some(Vector2::new(distx.value_unsafe, disty.value_unsafe));
+		let inlinelength = (inline.x*inline.x + inline.y*inline.y).sqrt();
+		return Some((
+		    Vector2::new(distx.value_unsafe, disty.value_unsafe),
+		    factor * inline.y / inlinelength
+		));
 	    }
 	}
 	None
@@ -460,7 +490,7 @@ pub static PLANET: ActorSpec = ActorSpec {
     mass: units::Ton::new(1.0e23),
     turnspeed: units::RadianPerSecond::new(0.0),
     turnacceleration: units::RadianPerSecond2::new(0.0),
-    moment: units::TonTrueSpaceUnit2::new(9.0e26),
+    inertia: units::TrueSpaceUnit2::new(9000.0),
     gravity: Gravity::FIELD,
     hitbox: Hitbox::Circle {radius: units::TrueSpaceUnit::new(150.0)},
     objecttype: ObjectType::Planet,

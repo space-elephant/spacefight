@@ -77,7 +77,7 @@ pub static CRUISER: ActorSpec = ActorSpec {
     mass: units::Ton::new(6.0),
     turnspeed: units::RadianPerSecond::new(0.75 * TAU),
     turnacceleration: units::RadianPerSecond2::new(12.0 * TAU),
-    moment: units::TonTrueSpaceUnit2::new(11234.5),
+    inertia: units::TrueSpaceUnit2::new(1872.4),
     gravity: Gravity::ACCELERATE,
     hitbox: Hitbox::Line {
 	length: units::TrueSpaceUnit::new(107.0),
@@ -112,7 +112,7 @@ pub static CRUISERMISSILE: ActorSpec = ActorSpec {
     mass: units::Ton::new(1.0),
     turnspeed: units::RadianPerSecond::new(0.0),
     turnacceleration: units::RadianPerSecond2::new(0.0),
-    moment: units::TonTrueSpaceUnit2::new(1291.0),
+    inertia: units::TrueSpaceUnit2::new(1291.0),
     gravity: Gravity::ACCELERATE,
     hitbox: Hitbox::Line {
 	length: units::TrueSpaceUnit::new(76.0),
