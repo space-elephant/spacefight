@@ -11,7 +11,7 @@ pub struct Cruiser {
 }
 
 impl Cruiser {
-    pub fn gen(ctx: &mut Context, position: ((units::TrueSpaceUnit<f32>, units::TrueSpaceUnit<f32>), f32), time: Instant, affiliation: NonZeroU8) -> Actor {
+    pub fn gen(ctx: &mut Context, position: ((units::TrueSpaceUnit<f32>, units::TrueSpaceUnit<f32>), f32), time: Instant, affiliation: NonZeroU8, generator: ActorGeneratorEnum) -> Actor {
 	const FIRERATE: Duration = Duration::new(0, 416_666_667);
 	
 	let image = graphics::Image::from_path(ctx, "/ships/cruiser/main.png").expect("missing image");
@@ -23,12 +23,12 @@ impl Cruiser {
 	    firerate: FireRate::new(time, FIRERATE),
 	};
 
-	Actor::new(native, super::UserControl.into(), translator.into())
+	Actor::new(native, generator, translator.into())
     }
 }
 
 impl ActorTranslator for Cruiser {
-    fn update(&mut self, native: &mut ActorNative, _generator: &mut ActorGeneratorEnum, _ctx: &mut Context, input: Input, time: Instant) -> GameResult<Request> {
+    fn update(&mut self, native: &mut ActorNative, _generator: &mut ActorGeneratorEnum, _ctx: &mut Context, input: Input, time: Instant, _others: Chain<Iter<Actor>, Iter<Actor>>) -> GameResult<Request> {
 	const MISSILETTL: Duration = Duration::new(2, 500_000_000);
 	const MISSILESTARTSPEED: units::TrueSpaceUnitPerSecond<f32> = units::TrueSpaceUnitPerSecond::new(960.0);
 	const MISSILESTARTOFFSET: units::TrueSpaceUnit<f32> = units::TrueSpaceUnit::new(128.0);
@@ -83,7 +83,10 @@ pub static CRUISER: ActorSpec = ActorSpec {
 	length: units::TrueSpaceUnit::new(107.0),
 	radius: units::TrueSpaceUnit::new(19.0),
     },
-    objecttype: ObjectType::Ship
+    objecttype: ObjectType::Ship,
+    takesdamage: true,
+    maxcrew: 18,
+    maxbattery: 18,
 };
 
 pub struct CruiserMissile {
@@ -91,13 +94,59 @@ pub struct CruiserMissile {
 }
 
 impl ActorTranslator for CruiserMissile {
-    fn update(&mut self, native: &mut ActorNative, _generator: &mut ActorGeneratorEnum, _ctx: &mut Context, _input: Input, time: Instant) -> GameResult<Request> {
+    fn update(&mut self, native: &mut ActorNative, _generator: &mut ActorGeneratorEnum, _ctx: &mut Context, _input: Input, time: Instant, others: Chain<Iter<Actor>, Iter<Actor>>) -> GameResult<Request> {
 	if self.ttl.done(time) {
 	    native.dead = true;
-	    Ok(Request::new(0.0, 0.0))
-	} else {
-	    Ok(Request::new(0.0, 1.0))
+	    return Ok(Request::new(0.0, 0.0));
 	}
+	
+	let mut target: Option<(&Actor, units::TrueSpaceUnit2<f32>)> = None;
+	for ship in others {
+	    if let Some(affiliation) = ship.native.affiliation {
+		if native.affiliation != Some(affiliation) {
+		    // Try to chase this one, if better
+		    match target {
+			None => {
+			    let distx = native.x - ship.native.x;
+			    let disty = native.y - ship.native.y;
+			    let distsq = distx*distx + disty*disty;
+			    target = Some((&ship, distsq));
+			},
+			Some((prev, prevdistsq)) => {
+			    let distx = native.x - ship.native.x;
+			    let disty = native.y - ship.native.y;
+			    let distsq = distx*distx + disty*disty;
+			    if distsq < prevdistsq {
+				target = Some((&ship, distsq));
+			    }
+			}
+		    }
+		}
+	    }
+	}
+	
+	let mut steering: f32 = 0.0;
+	if let Some((ship, distsq)) = target {
+	    let distx = native.x - ship.native.x;
+	    let disty = native.y - ship.native.y;
+
+	    let offset = native.direction.sin() * distx - native.direction.cos() * disty;
+
+	    const FULLTURN: f32 = 0.05;// less than this will have proportionally less
+	    let offsetsq = offset * offset;
+	    let factorsq = offsetsq / distsq;
+	    if *factorsq > FULLTURN*FULLTURN {
+		steering = 1.0;
+	    } else {
+		steering = *factorsq.sqrt() / FULLTURN;
+	    }
+
+	    if offset < 0.0 * units::TSU {
+		steering = -steering;
+	    }
+	}
+	
+	Ok(Request::new(steering, 1.0))
     }
     
     fn collide(&mut self, native: &mut ActorNative, _generator: &mut ActorGeneratorEnum, _ctx: &mut Context, _other: &mut Actor) -> CollisionType {
@@ -108,10 +157,10 @@ impl ActorTranslator for CruiserMissile {
 
 pub static CRUISERMISSILE: ActorSpec = ActorSpec {
     maxspeed: units::TrueSpaceUnitPerSecond::new(1920.0),
-    acceleration: units::TrueSpaceUnitPerSecond2::new(345.6),
+    acceleration: units::TrueSpaceUnitPerSecond2::new(61440.0),
     mass: units::Ton::new(1.0),
-    turnspeed: units::RadianPerSecond::new(0.0),
-    turnacceleration: units::RadianPerSecond2::new(0.0),
+    turnspeed: units::RadianPerSecond::new(0.167 * TAU),
+    turnacceleration: units::RadianPerSecond2::new(2.67 * TAU),
     inertia: units::TrueSpaceUnit2::new(1291.0),
     gravity: Gravity::ACCELERATE,
     hitbox: Hitbox::Line {
@@ -119,4 +168,54 @@ pub static CRUISERMISSILE: ActorSpec = ActorSpec {
 	radius: units::TrueSpaceUnit::new(6.0),
     },
     objecttype: ObjectType::Projectile,
+    takesdamage: true,
+    maxcrew: 4,
+    maxbattery: 0,
+};
+
+pub struct Avenger;
+
+impl Avenger {
+    pub fn gen(ctx: &mut Context, position: ((units::TrueSpaceUnit<f32>, units::TrueSpaceUnit<f32>), f32), _time: Instant, affiliation: NonZeroU8, generator: ActorGeneratorEnum) -> Actor {
+	let image = graphics::Image::from_path(ctx, "/ships/avenger/main.png").expect("missing image");
+	let native = ActorNative::new(image, position, &AVENGER, Some(affiliation));
+	let translator = Self;
+	
+	Actor::new(native, generator, translator.into())
+    }
+}
+
+impl ActorTranslator for Avenger {
+    fn update(&mut self, _native: &mut ActorNative, _generator: &mut ActorGeneratorEnum, _ctx: &mut Context, input: Input, _time: Instant, _others: Chain<Iter<Actor>, Iter<Actor>>) -> GameResult<Request> {	
+	let steer = if input.right {
+	    if input.left {0.0} else {1.0}
+	} else {
+	    if input.left {-1.0} else {0.0}
+	};
+
+	let throttle = if input.thrust {1.0} else {0.0};
+
+	Ok(Request::new(steer, throttle))
+    }
+    
+    fn collide(&mut self, _native: &mut ActorNative, _generator: &mut ActorGeneratorEnum, _ctx: &mut Context, _other: &mut Actor) -> CollisionType {
+	CollisionType::Kinetic
+    }
+}
+
+pub static AVENGER: ActorSpec = ActorSpec {
+    maxspeed: units::TrueSpaceUnitPerSecond::new(600.0),
+    acceleration: units::TrueSpaceUnitPerSecond2::new(2880.0),
+    mass: units::Ton::new(7.0),
+    turnspeed: units::RadianPerSecond::new(0.495 * TAU),
+    turnacceleration: units::RadianPerSecond2::new(7.92 * TAU),
+    inertia: units::TrueSpaceUnit2::new(2880.0),
+    gravity: Gravity::ACCELERATE,
+    hitbox: Hitbox::Circle {
+	radius: units::TrueSpaceUnit::new(76.0),
+    },
+    objecttype: ObjectType::Ship,
+    takesdamage: true,
+    maxcrew: 22,
+    maxbattery: 16,
 };

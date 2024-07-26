@@ -8,6 +8,9 @@ pub mod specs;
 pub mod units;
 mod collision;
 use crate::dim::{Sqrt, Dimensionless};
+use super::Camera;
+use core::slice::Iter;
+use std::iter::Chain;
 
 #[derive(Debug, Clone, Copy)]
 struct Gravity(u8);
@@ -46,15 +49,18 @@ enum CollisionType {
 
 #[derive(Debug)]
 pub struct ActorSpec {
-    maxspeed: units::TrueSpaceUnitPerSecond<f32>,
-    acceleration: units::TrueSpaceUnitPerSecond2<f32>,
-    mass: units::Ton<f32>,
+    maxspeed: units::TrueSpaceUnitPerSecond<f32>,// 24 times MAX_THRUST
+    acceleration: units::TrueSpaceUnitPerSecond2<f32>,// 576 times THRUST_INCREMENT / (THRUST_WAIT + 1)
+    mass: units::Ton<f32>,// SHIP_MASS
     turnspeed: units::RadianPerSecond<f32>,
     turnacceleration: units::RadianPerSecond2<f32>,
-    inertia: units::TrueSpaceUnit2<f32>,// Actually moment divided by mass
+    inertia: units::TrueSpaceUnit2<f32>,// Moment divided by mass
     gravity: Gravity,
     hitbox: Hitbox,
     objecttype: ObjectType,
+    takesdamage: bool,
+    maxcrew: u8,
+    maxbattery: u8,
 }
 
 pub struct Actor {
@@ -63,7 +69,20 @@ pub struct Actor {
     translator: ActorTranslatorEnum,
 }
 
-impl Actor {
+impl Actor {    
+    pub fn get_pos(&self) -> (units::TrueSpaceUnit<f32>, units::TrueSpaceUnit<f32>) {
+	(self.native.x, self.native.y)
+    }
+    
+    pub fn with_camera(mut self, camera: bool) -> Self {
+	self.native.maintaincamera = camera;
+	self
+    }
+
+    pub fn has_camera(&self) -> bool {
+	self.native.maintaincamera
+    }
+    
     pub fn dead(&self) -> bool {
 	self.native.dead
     }
@@ -76,25 +95,28 @@ impl Actor {
 	}
     }
 
-    pub fn draw(&mut self, _ctx: &mut Context, canvas: &mut graphics::Canvas) -> GameResult {
+    pub fn draw(&mut self, _ctx: &mut Context, canvas: &mut graphics::Canvas, camera: Camera) -> GameResult {
 	if !self.dead() {
+	    // units::TSU because a pixel in the images is the same as a TSU
+	    let scale = *(camera.scale * units::TSU).value();
 	    canvas.draw(
 		&self.native.image,
 		graphics::DrawParam::default()
 		    .offset(glam::vec2(0.5, 0.5))
 		    .rotation(self.native.direction)
 		    .dest(glam::vec2(
-			*(self.native.x / units::TSU).value(),
-			*(self.native.y / units::TSU).value()
+			*(self.native.x * camera.scale).value() - camera.left,
+			*(self.native.y * camera.scale).value() - camera.top
 		    ))
+		    .scale(glam::vec2(scale, scale))
 	    );
 	}
 	Ok(())
     }
     
-    pub fn update(&mut self, ctx: &mut Context, time: Instant) -> GameResult<Vec<Actor>> {
-	let input = self.generator.update(&mut self.native, &mut self.translator, ctx)?;
-	let request = self.translator.update(&mut self.native, &mut self.generator, ctx, input, time)?;
+    pub fn update(&mut self, ctx: &mut Context, time: Instant, others: Chain<Iter<Actor>, Iter<Actor>>) -> GameResult<Vec<Actor>> {
+	let input = self.generator.update(&mut self.native, &mut self.translator, ctx, others.clone())?;
+	let request = self.translator.update(&mut self.native, &mut self.generator, ctx, input, time, others)?;
 	self.native.update(ctx, request.steer, request.throttle)?;
 	Ok(request.summon)
     }
@@ -284,6 +306,9 @@ pub struct ActorNative {
     specs: &'static ActorSpec,
     affiliation: Option<NonZeroU8>,
     dead: bool,
+    maintaincamera: bool,
+    crew: u8,
+    battery: u8,
 }
 
 impl ActorNative {
@@ -299,6 +324,9 @@ impl ActorNative {
 	    specs,
 	    affiliation,
 	    dead: false,
+	    maintaincamera: false,
+	    crew: specs.maxcrew,
+	    battery: specs.maxbattery,
 	}
     }
     
@@ -371,26 +399,27 @@ struct Input {
 
 #[enum_dispatch(ActorGeneratorEnum)]
 trait ActorGenerator {
-    fn update(&mut self, native: &mut ActorNative, translator: &mut ActorTranslatorEnum, ctx: &mut Context) -> GameResult<Input>;
+    fn update(&mut self, native: &mut ActorNative, translator: &mut ActorTranslatorEnum, ctx: &mut Context, others: Chain<Iter<Actor>, Iter<Actor>>) -> GameResult<Input>;
 }
 
 impl ActorGenerator for Box<dyn ActorGenerator> {
-    fn update(&mut self, native: &mut ActorNative, translator: &mut ActorTranslatorEnum, ctx: &mut Context) -> GameResult<Input> {
-	(&mut **self).update(native, translator, ctx)
+    fn update(&mut self, native: &mut ActorNative, translator: &mut ActorTranslatorEnum, ctx: &mut Context, others: Chain<Iter<Actor>, Iter<Actor>>) -> GameResult<Input> {
+	(&mut **self).update(native, translator, ctx, others)
     }
 }
 
 #[enum_dispatch]
-enum ActorGeneratorEnum {
+#[allow(private_interfaces)]
+pub enum ActorGeneratorEnum {
     NoControl,
     UserControl,
     Other(Box<dyn ActorGenerator>),
 }
 
-struct NoControl;
+pub struct NoControl;
 
 impl ActorGenerator for NoControl {
-    fn update(&mut self, _native: &mut ActorNative, _translator: &mut ActorTranslatorEnum, _ctx: &mut Context) -> GameResult<Input> {
+    fn update(&mut self, _native: &mut ActorNative, _translator: &mut ActorTranslatorEnum, _ctx: &mut Context, _others: Chain<Iter<Actor>, Iter<Actor>>) -> GameResult<Input> {
 	Ok(Input {
 	    left: false,
 	    right: false,
@@ -401,10 +430,10 @@ impl ActorGenerator for NoControl {
     }
 }
 
-struct UserControl;
+pub struct UserControl;
 
 impl ActorGenerator for UserControl {
-    fn update(&mut self, _native: &mut ActorNative, _translator: &mut ActorTranslatorEnum, ctx: &mut Context) -> GameResult<Input> {
+    fn update(&mut self, _native: &mut ActorNative, _translator: &mut ActorTranslatorEnum, ctx: &mut Context, _others: Chain<Iter<Actor>, Iter<Actor>>) -> GameResult<Input> {
 	let left = ctx.keyboard.is_key_pressed(crate::KeyCode::Left);
 	let right = ctx.keyboard.is_key_pressed(crate::KeyCode::Right);
 	let thrust = ctx.keyboard.is_key_pressed(crate::KeyCode::Up);
@@ -438,13 +467,13 @@ impl Request {
 
 #[enum_dispatch(ActorTranslatorEnum)]
 trait ActorTranslator {
-    fn update(&mut self, native: &mut ActorNative, generator: &mut ActorGeneratorEnum, ctx: &mut Context, input: Input, time: Instant) -> GameResult<Request>;
+    fn update(&mut self, native: &mut ActorNative, generator: &mut ActorGeneratorEnum, ctx: &mut Context, input: Input, time: Instant, others: Chain<Iter<Actor>, Iter<Actor>>) -> GameResult<Request>;
     fn collide(&mut self, native: &mut ActorNative, generator: &mut ActorGeneratorEnum, ctx: &mut Context, other: &mut Actor) -> CollisionType;
 }
 
 impl ActorTranslator for Box<dyn ActorTranslator> {
-    fn update(&mut self, native: &mut ActorNative, generator: &mut ActorGeneratorEnum, ctx: &mut Context, input: Input, time: Instant) -> GameResult<Request> {
-	(&mut **self).update(native, generator, ctx, input, time)
+    fn update(&mut self, native: &mut ActorNative, generator: &mut ActorGeneratorEnum, ctx: &mut Context, input: Input, time: Instant, others: Chain<Iter<Actor>, Iter<Actor>>) -> GameResult<Request> {
+	(&mut **self).update(native, generator, ctx, input, time, others)
     }
     fn collide(&mut self, native: &mut ActorNative, generator: &mut ActorGeneratorEnum, ctx: &mut Context, other: &mut Actor) -> CollisionType {
 	(&mut **self).collide(native, generator, ctx, other)
@@ -454,7 +483,7 @@ impl ActorTranslator for Box<dyn ActorTranslator> {
 struct Planet;
 
 impl ActorTranslator for Planet {
-    fn update(&mut self, _native: &mut ActorNative, _generator: &mut ActorGeneratorEnum, _ctx: &mut Context, _input: Input, _time: Instant) -> GameResult<Request> {
+    fn update(&mut self, _native: &mut ActorNative, _generator: &mut ActorGeneratorEnum, _ctx: &mut Context, _input: Input, _time: Instant, _others: Chain<Iter<Actor>, Iter<Actor>>) -> GameResult<Request> {
 	Ok(
 	    Request {
 		steer: 0.0,
@@ -472,6 +501,7 @@ impl ActorTranslator for Planet {
 #[enum_dispatch]
 enum ActorTranslatorEnum {
     Planet,
+    Avenger(specs::Avenger),
     Cruiser(specs::Cruiser),
     CruiserMissile(specs::CruiserMissile),
     Other(Box<dyn ActorTranslator>),
@@ -494,6 +524,9 @@ pub static PLANET: ActorSpec = ActorSpec {
     gravity: Gravity::FIELD,
     hitbox: Hitbox::Circle {radius: units::TrueSpaceUnit::new(150.0)},
     objecttype: ObjectType::Planet,
+    takesdamage: false,
+    maxcrew: 1,
+    maxbattery: 0,
 };
 
 #[derive(Debug, Clone, Copy)]

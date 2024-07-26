@@ -11,6 +11,7 @@ mod internal {
 	}
 
 	derived {
+	    TSUI: TrueSpaceUnitInv = (Unitless / TrueSpaceUnit);
 	    TSU2: TrueSpaceUnit2 = (TrueSpaceUnit * TrueSpaceUnit), Area;
             TSUpS: TrueSpaceUnitPerSecond = (TrueSpaceUnit / Second), Velocity;
             TSUpS2: TrueSpaceUnitPerSecond2 = (TrueSpaceUnit / Second / Second), Acceleration;
@@ -30,4 +31,4 @@ mod internal {
 }
 
 pub use internal::f32consts::*;
-pub use internal::{Unitless, TrueSpaceUnit, Second, Ton, TrueSpaceUnit2, TrueSpaceUnitPerSecond, TrueSpaceUnitPerSecond2, RadianPerSecond, RadianPerSecond2};
+pub use internal::{Unitless, TrueSpaceUnit, Second, Ton, TrueSpaceUnitInv, TrueSpaceUnit2, TrueSpaceUnitPerSecond, TrueSpaceUnitPerSecond2, RadianPerSecond, RadianPerSecond2};

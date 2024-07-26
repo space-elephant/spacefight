@@ -8,6 +8,7 @@ mod ship;
 use ship::units;
 #[macro_use]
 extern crate dimensioned as dim;
+use dim::Dimensionless;
 
 fn main() {
     let (mut ctx, event_loop) = ContextBuilder::new("spacefight", "Russell VA3BSP <rmorland@tutanota.com>")
@@ -53,7 +54,14 @@ impl MainState {
 		    ctx,
 		    ((100.0 * units::TSU, 100.0 * units::TSU), 0.0), time,
 		    NonZeroU8::new(1).unwrap(),
-		),
+		    ship::UserControl.into(),
+		).with_camera(true),
+		ship::specs::Avenger::gen(
+		    ctx,
+		    ((1820.0 * units::TSU, 980.0 * units::TSU), 0.0), time,
+		    NonZeroU8::new(2).unwrap(),
+		    ship::NoControl.into(),
+		).with_camera(true),
 	    ],
         }
     }
@@ -63,26 +71,28 @@ impl EventHandler for MainState {
     fn update(&mut self, ctx: &mut Context) -> GameResult {
 	let time = std::time::Instant::now();
 
-	for index in 1..self.ships.len() {
-	    let (left, right) = self.ships.split_at_mut(index);
-	    let dest = &mut right[0];
-	    for source in left {
-		source.interact(ctx, dest);
-	    }
+	let mut extra = Vec::new();
+	for index in 0..self.ships.len() {
+	    let (before, notbefore) = self.ships.split_at_mut(index);
+	    let (main, after) = notbefore.split_at_mut(1);
+	    let mut summon = main[0].update(ctx, time, before.iter().chain(after.iter()))?;
+	    extra.append(&mut summon);
 	}
+	self.ships.append(&mut extra);
 
-	let mut index = self.ships.len();
-	while index > 0 {
-	    index -= 1;
-	    let mut summon = self.ships[index].update(ctx, time)?;
-	    self.ships.append(&mut summon);
-	}
-	
 	let mut index = self.ships.len();
 	while index > 0 {
 	    index -= 1;
 	    if self.ships[index].dead() {
 		self.ships.remove(index);
+	    }
+	}
+
+	for index in 1..self.ships.len() {
+	    let (left, right) = self.ships.split_at_mut(index);
+	    let dest = &mut right[0];
+	    for source in left {
+		source.interact(ctx, dest);
 	    }
 	}
 
@@ -94,11 +104,73 @@ impl EventHandler for MainState {
 	if let Some(monitor) = window.current_monitor() {
 	    window.set_inner_size(monitor.size());
 	}
+
+	let camera = Camera::new(&self.ships);
 	
         let mut canvas = graphics::Canvas::from_frame(ctx, graphics::Color::BLACK);
 	for ship in self.ships.iter_mut().rev() {
-	    ship.draw(ctx, &mut canvas)?;
+	    ship.draw(ctx, &mut canvas, camera)?;
 	}
         canvas.finish(ctx)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Camera {
+    left: f32,
+    top: f32,
+    scale: units::TrueSpaceUnitInv<f32>,
+}
+
+impl Camera {
+    fn new(ships: &[ship::Actor]) -> Self {
+	const MARGIN: units::TrueSpaceUnit<f32> = units::TrueSpaceUnit::new(360.0);
+
+	let mut left = f32::INFINITY * units::TSU;
+	let mut top = f32::INFINITY * units::TSU;
+	let mut right = -f32::INFINITY * units::TSU;
+	let mut bottom = -f32::INFINITY * units::TSU;
+
+	for ship in ships {
+	    if ship.has_camera() {
+		let (x, y) = ship.get_pos();
+		if x < left {
+		    left = x;
+		}
+		if x > right {
+		    right = x;
+		}
+		if y < top {
+		    top = y;
+		}
+		if y > bottom {
+		    bottom = y;
+		}
+	    }
+	}
+
+	left -= MARGIN;
+	top -= MARGIN;
+	right += MARGIN;
+	bottom += MARGIN;
+
+	let screenwidth = 1920.0f32;// TODO: determine programatically
+	let screenheight = 1080.0f32;
+
+	let scalex = screenwidth / (right - left);
+	let scaley = screenheight / (bottom - top);
+	let scale = if scalex < scaley {scalex} else {scaley};
+
+	let x = (left + right) * 0.5 * scale;
+	let y = (top + bottom) * 0.5 * scale;
+
+	let screenleft = *(x - screenwidth * 0.5).value();
+	let screentop = *(y - screenheight * 0.5).value();
+
+	Camera {
+	    left: screenleft,
+	    top: screentop,
+	    scale,
+	}
     }
 }
