@@ -149,6 +149,15 @@ impl Camera {
 	    }
 	}
 
+	if left == f32::INFINITY * units::TSU {
+	    // no ships of signifigance found, make default
+	    return Camera {
+		left: 0.0,
+		top: 0.0,
+		scale: units::TSUI,
+	    }
+	}
+
 	left -= MARGIN;
 	top -= MARGIN;
 	right += MARGIN;

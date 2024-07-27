@@ -61,6 +61,8 @@ pub struct ActorSpec {
     takesdamage: bool,
     maxcrew: u8,
     maxbattery: u8,
+    chargetime: Duration,
+    chargevalue: u8,
 }
 
 pub struct Actor {
@@ -69,7 +71,16 @@ pub struct Actor {
     translator: ActorTranslatorEnum,
 }
 
-impl Actor {    
+impl Actor {
+    fn damage(&mut self, damage: u8) {
+	if self.native.specs.takesdamage {
+	    self.native.crew = self.native.crew.saturating_sub(damage);
+	    if self.native.crew == 0 {
+		self.native.dead = true;
+	    }
+	}
+    }
+    
     pub fn get_pos(&self) -> (units::TrueSpaceUnit<f32>, units::TrueSpaceUnit<f32>) {
 	(self.native.x, self.native.y)
     }
@@ -117,7 +128,7 @@ impl Actor {
     pub fn update(&mut self, ctx: &mut Context, time: Instant, others: Chain<Iter<Actor>, Iter<Actor>>) -> GameResult<Vec<Actor>> {
 	let input = self.generator.update(&mut self.native, &mut self.translator, ctx, others.clone())?;
 	let request = self.translator.update(&mut self.native, &mut self.generator, ctx, input, time, others)?;
-	self.native.update(ctx, request.steer, request.throttle)?;
+	self.native.update(ctx, request.steer, request.throttle, time)?;
 	Ok(request.summon)
     }
 
@@ -309,6 +320,7 @@ pub struct ActorNative {
     maintaincamera: bool,
     crew: u8,
     battery: u8,
+    recharge: FireRate,
 }
 
 impl ActorNative {
@@ -327,10 +339,18 @@ impl ActorNative {
 	    maintaincamera: false,
 	    crew: specs.maxcrew,
 	    battery: specs.maxbattery,
+	    recharge: FireRate::new(specs.chargetime),
 	}
     }
     
-    fn update(&mut self, ctx: &mut Context, steer: f32, throttle: f32) -> GameResult {
+    fn update(&mut self, ctx: &mut Context, steer: f32, throttle: f32, now: Instant) -> GameResult {
+	if self.battery != self.specs.maxbattery && self.recharge.try_fire(now) {
+	    self.battery = self.battery.saturating_add(self.specs.chargevalue);
+	    if self.battery > self.specs.maxbattery {
+		self.battery = self.specs.maxbattery;
+	    }
+	}
+	
 	let time = ctx.time.delta().as_secs_f32() * units::S;
 	
 	let targetangularvelocity = self.specs.turnspeed * steer;
@@ -493,7 +513,12 @@ impl ActorTranslator for Planet {
 	)
     }
 
-    fn collide(&mut self, _native: &mut ActorNative, _generator: &mut ActorGeneratorEnum, _ctx: &mut Context, _other: &mut Actor) -> CollisionType {
+    fn collide(&mut self, _native: &mut ActorNative, _generator: &mut ActorGeneratorEnum, _ctx: &mut Context, other: &mut Actor) -> CollisionType {
+	let mut damage = other.native.crew >> 2;
+	if damage == 0 {
+	    damage = 1;
+	}
+	other.damage(damage);
 	CollisionType::Kinetic
     }
 }
@@ -527,6 +552,8 @@ pub static PLANET: ActorSpec = ActorSpec {
     takesdamage: false,
     maxcrew: 1,
     maxbattery: 0,
+    chargetime: Duration::new(0, 0),
+    chargevalue: 0,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -553,9 +580,9 @@ struct FireRate {
 }
 
 impl FireRate {
-    fn new(now: Instant, cooldown: Duration) -> Self {
+    fn new(cooldown: Duration) -> Self {
 	Self {
-	    nextshot: now,
+	    nextshot: Instant::now(),// maybe make start at 0
 	    cooldown,
 	}
     }
