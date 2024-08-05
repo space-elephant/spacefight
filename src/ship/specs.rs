@@ -1,5 +1,6 @@
 use std::f32::consts::TAU;
 use super::*;
+use crate::stats::Captain;
 use ggez::{Context, GameResult};
 use ggez::graphics;
 use std::time::{Instant, Duration};
@@ -8,37 +9,44 @@ use std::num::NonZeroU8;
 pub struct Cruiser {
     missileimage: graphics::Image,
     firerate: FireRate,
+    captain: Box<Captain<15>>,
 }
 
 impl Cruiser {
-    pub fn gen(ctx: &mut Context, position: ((units::TrueSpaceUnit<f32>, units::TrueSpaceUnit<f32>), f32), _time: Instant, affiliation: NonZeroU8, generator: ActorGeneratorEnum) -> Actor {
+    pub fn gen(ctx: &mut Context, position: ((units::TrueSpaceUnit<f32>, units::TrueSpaceUnit<f32>), f32), _time: Instant, affiliation: NonZeroU8, generator: ActorGeneratorEnum) -> (Actor, graphics::Image) {
 	const FIRERATE: Duration = Duration::new(0, 416_666_667);
-	
+
 	let image = graphics::Image::from_path(ctx, "/ships/cruiser/main.png").expect("missing image");
 	let native = ActorNative::new(image, position, &CRUISER, Some(affiliation));
 	
 	let missileimage = graphics::Image::from_path(ctx, "/ships/cruiser/missile.png").expect("missing image");
+	let captain = Captain::new(ctx, &CRUISER, "Kirk");
+	let display = captain.extract_display();
+	
 	let translator = Self {
 	    missileimage,
 	    firerate: FireRate::new(FIRERATE),
+	    captain: Box::new(captain),
 	};
 
-	Actor::new(native, generator, translator.into())
+	(Actor::new(native, generator, translator.into()), display)
     }
 }
 
 impl ActorTranslator for Cruiser {
     fn update(&mut self, native: &mut ActorNative, _generator: &mut ActorGeneratorEnum, _ctx: &mut Context, input: Input, time: Instant, _others: Chain<Iter<Actor>, Iter<Actor>>) -> GameResult<Request> {
-	let steer = if input.right {
-	    if input.left {0.0} else {1.0}
+	let steer = if input.is(Input::RIGHT) {
+	    1.0
+	} else if input.is(Input::LEFT) {
+	    -1.0
 	} else {
-	    if input.left {-1.0} else {0.0}
+	    0.0
 	};
 
-	let throttle = if input.thrust {1.0} else {0.0};
+	let throttle = if input.is(Input::THRUST) {1.0} else {0.0};
 
 	let mut summon = Vec::new();
-	if input.fire && native.battery >= CruiserMissile::CHARGECOST && self.firerate.try_fire(time) {
+	if input.is(Input::FIRE) && native.battery >= CruiserMissile::CHARGECOST && self.firerate.try_fire(time) {
 	    native.battery -= CruiserMissile::CHARGECOST;
 	    let unit = (native.direction.cos(), native.direction.sin());
 	    let dx = CruiserMissile::STARTSPEED * unit.0;
@@ -54,7 +62,7 @@ impl ActorTranslator for Cruiser {
 		    native,
 		    super::NoControl.into(),
 		    CruiserMissile {
-			ttl: TimeToLive::new(time, CruiserMissile::TTL),
+			ttl: Timer::new(time, CruiserMissile::TTL),
 		    }.into(),
 		).with_velocity((dx, dy))
 	    );
@@ -65,6 +73,10 @@ impl ActorTranslator for Cruiser {
     
     fn collide(&mut self, _native: &mut ActorNative, _generator: &mut ActorGeneratorEnum, _ctx: &mut Context, _other: &mut Actor) -> CollisionType {
 	CollisionType::Kinetic
+    }
+    
+    fn update_captain(&mut self, _native: &mut ActorNative, _generator: &mut ActorGeneratorEnum, ctx: &mut Context, input: Input, time: Instant, _others: Chain<Iter<Actor>, Iter<Actor>>) -> GameResult {
+	self.captain.update_input(ctx, input, time)
     }
 }
 
@@ -86,10 +98,12 @@ pub static CRUISER: ActorSpec = ActorSpec {
     maxbattery: 18,
     chargetime: Duration::new(0, 375_000_000),
     chargevalue: 1,
+    species: "Human",
+    captainsrc: Some("/ships/cruiser/cruiser-cap.ani"),
 };
 
 pub struct CruiserMissile {
-    ttl: TimeToLive,
+    ttl: Timer,
 }
 
 impl CruiserMissile {
@@ -119,7 +133,7 @@ impl ActorTranslator for CruiserMissile {
 			    let distsq = distx*distx + disty*disty;
 			    target = Some((&ship, distsq));
 			},
-			Some((prev, prevdistsq)) => {
+			Some((_prev, prevdistsq)) => {
 			    let distx = native.x - ship.native.x;
 			    let disty = native.y - ship.native.y;
 			    let distsq = distx*distx + disty*disty;
@@ -161,6 +175,10 @@ impl ActorTranslator for CruiserMissile {
 	native.dead = true;
 	CollisionType::Silent
     }
+    
+    fn update_captain(&mut self, _native: &mut ActorNative, _generator: &mut ActorGeneratorEnum, _ctx: &mut Context, _input: Input, _time: Instant, _others: Chain<Iter<Actor>, Iter<Actor>>) -> GameResult {
+	Ok(())
+    }
 }
 
 pub static CRUISERMISSILE: ActorSpec = ActorSpec {
@@ -181,35 +199,52 @@ pub static CRUISERMISSILE: ActorSpec = ActorSpec {
     maxbattery: 0,
     chargetime: Duration::new(0, 0),
     chargevalue: 0,
+    species: "",
+    captainsrc: None,
 };
 
-pub struct Avenger;
+pub struct Avenger {
+    captain: Box<Captain<15>>,
+}
 
 impl Avenger {
-    pub fn gen(ctx: &mut Context, position: ((units::TrueSpaceUnit<f32>, units::TrueSpaceUnit<f32>), f32), _time: Instant, affiliation: NonZeroU8, generator: ActorGeneratorEnum) -> Actor {
+    pub fn gen(ctx: &mut Context, position: ((units::TrueSpaceUnit<f32>, units::TrueSpaceUnit<f32>), f32), _time: Instant, affiliation: NonZeroU8, generator: ActorGeneratorEnum) -> (Actor, graphics::Image) {
 	let image = graphics::Image::from_path(ctx, "/ships/avenger/main.png").expect("missing image");
 	let native = ActorNative::new(image, position, &AVENGER, Some(affiliation));
-	let translator = Self;
 	
-	Actor::new(native, generator, translator.into())
+	let captain = Captain::new(ctx, &AVENGER, "Gorgon");
+	let display = captain.extract_display();
+	
+	let translator = Self {
+	    captain: Box::new(captain),
+	};
+	
+	(Actor::new(native, generator, translator.into()), display)
     }
 }
 
 impl ActorTranslator for Avenger {
     fn update(&mut self, _native: &mut ActorNative, _generator: &mut ActorGeneratorEnum, _ctx: &mut Context, input: Input, _time: Instant, _others: Chain<Iter<Actor>, Iter<Actor>>) -> GameResult<Request> {	
-	let steer = if input.right {
-	    if input.left {0.0} else {1.0}
+	let steer = if input.is(Input::RIGHT) {
+	    1.0
+	} else if input.is(Input::LEFT) {
+	    -1.0
 	} else {
-	    if input.left {-1.0} else {0.0}
+	    0.0
 	};
 
-	let throttle = if input.thrust {1.0} else {0.0};
+	let throttle = if input.is(Input::THRUST) {1.0} else {0.0};
 
 	Ok(Request::new(steer, throttle))
     }
     
     fn collide(&mut self, _native: &mut ActorNative, _generator: &mut ActorGeneratorEnum, _ctx: &mut Context, _other: &mut Actor) -> CollisionType {
 	CollisionType::Kinetic
+    }
+    
+    fn update_captain(&mut self, _native: &mut ActorNative, _generator: &mut ActorGeneratorEnum, _ctx: &mut Context, _input: Input, _time: Instant, _others: Chain<Iter<Actor>, Iter<Actor>>) -> GameResult {
+	//todo
+	Ok(())
     }
 }
 
@@ -230,4 +265,6 @@ pub static AVENGER: ActorSpec = ActorSpec {
     maxbattery: 16,
     chargetime: Duration::new(0, 208_333_333),
     chargevalue: 4,
+    species: "Ilwrath",
+    captainsrc: Some("/ships/avenger/avenger-cap.ani"),
 };

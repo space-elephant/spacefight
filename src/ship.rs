@@ -11,6 +11,7 @@ use crate::dim::{Sqrt, Dimensionless};
 use super::Camera;
 use core::slice::Iter;
 use std::iter::Chain;
+use std::ops::BitOr;
 
 #[derive(Debug, Clone, Copy)]
 struct Gravity(u8);
@@ -59,10 +60,12 @@ pub struct ActorSpec {
     hitbox: Hitbox,
     objecttype: ObjectType,
     takesdamage: bool,
-    maxcrew: u8,
-    maxbattery: u8,
+    pub maxcrew: u8,
+    pub maxbattery: u8,
     chargetime: Duration,
     chargevalue: u8,
+    pub species: &'static str,
+    pub captainsrc: Option<&'static str>,
 }
 
 pub struct Actor {
@@ -106,7 +109,7 @@ impl Actor {
 	}
     }
 
-    pub fn draw(&mut self, _ctx: &mut Context, canvas: &mut graphics::Canvas, camera: Camera) -> GameResult {
+    pub fn draw(&mut self, ctx: &mut Context, canvas: &mut graphics::Canvas, camera: Camera, time: Instant, others: Chain<Iter<Actor>, Iter<Actor>>) -> GameResult {
 	if !self.dead() {
 	    // units::TSU because a pixel in the images is the same as a TSU
 	    let scale = *(camera.scale * units::TSU).value();
@@ -121,12 +124,15 @@ impl Actor {
 		    ))
 		    .scale(glam::vec2(scale, scale))
 	    );
+	    
+	    let input = self.generator.update(&mut self.native, &mut self.translator, ctx, others.clone())?.normalize();
+	    self.translator.update_captain(&mut self.native, &mut self.generator, ctx, input, time, others)?;
 	}
 	Ok(())
     }
     
     pub fn update(&mut self, ctx: &mut Context, time: Instant, others: Chain<Iter<Actor>, Iter<Actor>>) -> GameResult<Vec<Actor>> {
-	let input = self.generator.update(&mut self.native, &mut self.translator, ctx, others.clone())?;
+	let input = self.generator.update(&mut self.native, &mut self.translator, ctx, others.clone())?.normalize();
 	let request = self.translator.update(&mut self.native, &mut self.generator, ctx, input, time, others)?;
 	self.native.update(ctx, request.steer, request.throttle, time)?;
 	Ok(request.summon)
@@ -409,12 +415,39 @@ impl ActorNative {
     }
 }
 
-struct Input {
-    left: bool,
-    right: bool,
-    thrust: bool,
-    fire: bool,
-    secondary: bool,
+#[derive(Clone, Copy, Default)]
+pub struct Input (u8);
+
+impl Input {
+    pub const LEFT: Input = Input(1 << 0);
+    pub const RIGHT: Input = Input(1 << 1);
+    pub const THRUST: Input = Input(1 << 2);
+    pub const FIRE: Input = Input(1 << 3);
+    pub const SECONDARY: Input = Input(1 << 4);
+
+    pub fn normalize(mut self) -> Self {
+	if self.0 & (Self::LEFT.0 | Self::RIGHT.0) == (Self::LEFT.0 | Self::RIGHT.0) {
+	    self.0 &= !(Self::LEFT.0 | Self::RIGHT.0);
+	}
+	self
+    }
+
+    pub fn new(left: bool, right: bool, thrust: bool, fire: bool, secondary: bool) -> Self {
+	Input((left as u8) << 0 | (right as u8) << 1 | (thrust as u8) << 2 | (fire as u8) << 3 | (secondary as u8) << 4)
+    }
+
+    pub fn is(self, other: Input) -> bool {
+	self.0 & other.0 != 0
+    }
+}
+
+impl BitOr for Input {
+    // see bitflags crate
+    type Output = Input;
+    
+    fn bitor(self, other: Input) -> Input {
+	Input(self.0 | other.0)
+    }
 }
 
 #[enum_dispatch(ActorGeneratorEnum)]
@@ -440,13 +473,7 @@ pub struct NoControl;
 
 impl ActorGenerator for NoControl {
     fn update(&mut self, _native: &mut ActorNative, _translator: &mut ActorTranslatorEnum, _ctx: &mut Context, _others: Chain<Iter<Actor>, Iter<Actor>>) -> GameResult<Input> {
-	Ok(Input {
-	    left: false,
-	    right: false,
-	    thrust: false,
-	    fire: false,
-	    secondary: false,
-	})
+	Ok(Input::new(false, false, false, false, false))
     }
 }
 
@@ -459,13 +486,13 @@ impl ActorGenerator for UserControl {
 	let thrust = ctx.keyboard.is_key_pressed(crate::KeyCode::Up);
 	let fire = ctx.keyboard.is_key_pressed(crate::KeyCode::Return);
 	let secondary = ctx.keyboard.is_key_pressed(crate::KeyCode::RShift);
-	Ok(Input {
+	Ok(Input::new(
 	    left,
 	    right,
 	    thrust,
 	    fire,
 	    secondary,
-	})
+	))
     }
 }
 
@@ -489,6 +516,7 @@ impl Request {
 trait ActorTranslator {
     fn update(&mut self, native: &mut ActorNative, generator: &mut ActorGeneratorEnum, ctx: &mut Context, input: Input, time: Instant, others: Chain<Iter<Actor>, Iter<Actor>>) -> GameResult<Request>;
     fn collide(&mut self, native: &mut ActorNative, generator: &mut ActorGeneratorEnum, ctx: &mut Context, other: &mut Actor) -> CollisionType;
+    fn update_captain(&mut self, native: &mut ActorNative, generator: &mut ActorGeneratorEnum, ctx: &mut Context, input: Input, time: Instant, others: Chain<Iter<Actor>, Iter<Actor>>) -> GameResult;
 }
 
 impl ActorTranslator for Box<dyn ActorTranslator> {
@@ -498,6 +526,18 @@ impl ActorTranslator for Box<dyn ActorTranslator> {
     fn collide(&mut self, native: &mut ActorNative, generator: &mut ActorGeneratorEnum, ctx: &mut Context, other: &mut Actor) -> CollisionType {
 	(&mut **self).collide(native, generator, ctx, other)
     }
+    fn update_captain(&mut self, native: &mut ActorNative, generator: &mut ActorGeneratorEnum, ctx: &mut Context, input: Input, time: Instant, others: Chain<Iter<Actor>, Iter<Actor>>) -> GameResult {
+	(&mut **self).update_captain(native, generator, ctx, input, time, others)
+    }
+}
+
+#[enum_dispatch]
+enum ActorTranslatorEnum {
+    Planet,
+    Avenger(specs::Avenger),
+    Cruiser(specs::Cruiser),
+    CruiserMissile(specs::CruiserMissile),
+    Other(Box<dyn ActorTranslator>),
 }
 
 struct Planet;
@@ -521,19 +561,14 @@ impl ActorTranslator for Planet {
 	other.damage(damage);
 	CollisionType::Kinetic
     }
-}
-
-#[enum_dispatch]
-enum ActorTranslatorEnum {
-    Planet,
-    Avenger(specs::Avenger),
-    Cruiser(specs::Cruiser),
-    CruiserMissile(specs::CruiserMissile),
-    Other(Box<dyn ActorTranslator>),
+    
+    fn update_captain(&mut self, _native: &mut ActorNative, _generator: &mut ActorGeneratorEnum, _ctx: &mut Context, _input: Input, _time: Instant, _others: Chain<Iter<Actor>, Iter<Actor>>) -> GameResult {
+	Ok(())
+    }
 }
 
 pub fn gen_planet(ctx: &mut Context, position: ((units::TrueSpaceUnit<f32>, units::TrueSpaceUnit<f32>), f32), _time: Instant) -> Actor {
-    let image = graphics::Image::from_path(ctx, "/planets/rainbow.png").expect("missing image");
+    let image = graphics::Image::from_path(ctx, "/scenery/planets/rainbow.png").expect("missing image");
 
     let native = ActorNative::new(image, position, &PLANET, None);
     Actor::new(native, NoControl.into(), Planet.into())
@@ -554,22 +589,32 @@ pub static PLANET: ActorSpec = ActorSpec {
     maxbattery: 0,
     chargetime: Duration::new(0, 0),
     chargevalue: 0,
+    species: "",
+    captainsrc: None,
 };
 
 #[derive(Debug, Clone, Copy)]
-struct TimeToLive {
+pub struct Timer {
     endtime: Instant,
 }
 
-impl TimeToLive {
-    fn new(now: Instant, ttl: Duration) -> Self {
+impl Timer {
+    pub fn new(now: Instant, ttl: Duration) -> Self {
 	Self {
 	    endtime: now + ttl,
 	}
     }
 
-    fn done(self, now: Instant) -> bool {
+    pub fn done(self, now: Instant) -> bool {
 	now > self.endtime
+    }
+}
+
+impl Default for Timer {
+    fn default() -> Self {
+	Timer {
+	    endtime: Instant::now(),
+	}
     }
 }
 
