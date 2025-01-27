@@ -75,8 +75,8 @@ impl ActorTranslator for Cruiser {
 	CollisionType::Kinetic
     }
     
-    fn update_captain(&mut self, _native: &mut ActorNative, _generator: &mut ActorGeneratorEnum, ctx: &mut Context, input: Input, time: Instant, _others: Chain<Iter<Actor>, Iter<Actor>>) -> GameResult {
-	self.captain.update_input(ctx, input, time)
+    fn update_captain(&mut self, native: &mut ActorNative, _generator: &mut ActorGeneratorEnum, ctx: &mut Context, input: Input, time: Instant, _others: Chain<Iter<Actor>, Iter<Actor>>) -> GameResult {
+	self.captain.update_input(ctx, input, time, native)
     }
 }
 
@@ -242,9 +242,8 @@ impl ActorTranslator for Avenger {
 	CollisionType::Kinetic
     }
     
-    fn update_captain(&mut self, _native: &mut ActorNative, _generator: &mut ActorGeneratorEnum, _ctx: &mut Context, _input: Input, _time: Instant, _others: Chain<Iter<Actor>, Iter<Actor>>) -> GameResult {
-	//todo
-	Ok(())
+    fn update_captain(&mut self, native: &mut ActorNative, _generator: &mut ActorGeneratorEnum, ctx: &mut Context, input: Input, time: Instant, _others: Chain<Iter<Actor>, Iter<Actor>>) -> GameResult {
+	self.captain.update_input(ctx, input, time, native)
     }
 }
 

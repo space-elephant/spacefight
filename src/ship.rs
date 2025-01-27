@@ -320,12 +320,12 @@ pub struct ActorNative {
     angularvelocity: units::RadianPerSecond<f32>,
     dx: units::TrueSpaceUnitPerSecond<f32>,
     dy: units::TrueSpaceUnitPerSecond<f32>,
-    specs: &'static ActorSpec,
+    pub specs: &'static ActorSpec,
     affiliation: Option<NonZeroU8>,
     dead: bool,
     maintaincamera: bool,
-    crew: u8,
-    battery: u8,
+    pub crew: u8,
+    pub battery: u8,
     recharge: FireRate,
 }
 

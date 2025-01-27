@@ -53,7 +53,7 @@ impl<const N: usize> Captain<N> {
 	self.display.clone()
     }
 
-    pub fn update_input(&mut self, ctx: &mut Context, new: Input, time: Instant) -> GameResult {
+    pub fn update_input(&mut self, ctx: &mut Context, new: Input, time: Instant, native: &crate::ship::ActorNative) -> GameResult {
 	let mut canvas = graphics::Canvas::from_image(ctx, self.display.clone(), None);
 	
 	if new.is(Input::RIGHT) != self.previnput.is(Input::RIGHT) {
@@ -111,7 +111,8 @@ impl<const N: usize> Captain<N> {
 	    }
 	}
 
-	self.draw_crew(ctx, &mut canvas, 18);
+	self.draw_property(ctx, &mut canvas, native.specs.maxcrew, native.crew, 16.0, graphics::Color::GREEN);
+	self.draw_property(ctx, &mut canvas, native.specs.maxbattery, native.battery, 208.0, graphics::Color::RED);
 	    
 	canvas.finish(ctx)?;
 	self.previnput = new;
@@ -128,8 +129,8 @@ impl<const N: usize> Captain<N> {
 	Ok(())
     }
 
-    fn draw_crew(&mut self, ctx: &mut Context, canvas: &mut graphics::Canvas, maxcrew: u8) {
-	let rows = (maxcrew + 1) >> 1;// (truncating)
+    pub fn draw_property(&mut self, ctx: &mut Context, canvas: &mut graphics::Canvas, max: u8, value: u8, cornerx: f32, color: graphics::Color) {
+	let rows = (max + 1) >> 1;// (truncating)
 	let height = ((rows << 3) + 4) as f32;
 	let rect = graphics::Rect {
 	    x: 0.0,
@@ -146,7 +147,29 @@ impl<const N: usize> Captain<N> {
 	canvas.draw(
 	    &mesh,
 	    graphics::DrawParam::default()
-		.dest(glam::vec2(16.0, 220.0 - height))
+		.dest(glam::vec2(cornerx, 220.0 - height))
 	);
+
+	for value in 0..value {
+	    let x = cornerx + 16.0 - (value & 1) as f32 * 12.0;
+	    let y = 212.0 - (value >> 1) as f32 * 8.0;
+	    let rect = graphics::Rect {
+		x: 0.0,
+		y: 0.0,
+		w: 8.0,
+		h: 4.0,
+	    };
+	    let mesh = graphics::Mesh::new_rectangle(
+		ctx,
+		graphics::DrawMode::Fill(Default::default()),
+		rect,
+		color,
+	    ).unwrap();
+	    canvas.draw(
+		&mesh,
+		graphics::DrawParam::default()
+		    .dest(glam::vec2(x, y))
+	    );
+	}
     }
 }
